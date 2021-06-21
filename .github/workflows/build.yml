@@ -20,6 +20,7 @@ jobs:
       run: |
         echo "nodeLinker: node-modules" >> .yarnrc.yml
     - name: Generate yarn file
+      shell: pwsh
       run: |
         Remove-Item yarn.lock
         yarn install
