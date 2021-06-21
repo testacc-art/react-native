@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        operating-system: [ubuntu-latest]
+        operating-system: [ubuntu-latest, macos-latest]
         version: [ '12.x' ]
     steps:
     - name: Checkout
@@ -19,16 +19,6 @@ jobs:
     - name: Generate simple .yarnrc.yml
       run: |
         echo "nodeLinker: node-modules" >> .yarnrc.yml
-    - name: Generate yarn file
-      shell: pwsh
-      run: |
-        Remove-Item yarn.lock
-        yarn install
-    - name: Remove dependencies
-      shell: pwsh
-      run: Remove-Item node_modules -Force -Recurse
-    - name: Clean global cache
-      run: yarn cache clean --all
     - uses: akv-platform/setup-node@add-caching-for-node-dependencies
       with:
         node-version: ${{ matrix.version }}
@@ -43,9 +33,3 @@ jobs:
       run: npm --version
     - name: Install dependencies
       run: yarn install
-    - name: upload screenshot
-      if: ${{ always() }}
-      uses: actions/upload-artifact@master
-      with:
-        name: yarn.lock
-        path: yarn.lock
