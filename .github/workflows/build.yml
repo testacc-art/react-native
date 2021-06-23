@@ -22,7 +22,6 @@ jobs:
     - uses: akv-platform/setup-node@add-caching-for-node-dependencies
       with:
         node-version: ${{ matrix.version }}
-        cache: yarn
     - name: Node version
       shell: pwsh
       run: node --version
