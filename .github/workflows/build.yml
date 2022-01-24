@@ -7,16 +7,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        operating-system: [ubuntu-18.04, macos-latest, windows-latest]
-        version: [ '12.x', '14.x', '16.x' ]
+        operating-system: [ macos-11 ]
+        version: [ '14.x' ]
     steps:
     - name: Checkout
       uses: actions/checkout@v2
 
-    - uses: dmitry-shibanov/setup-node@add-caching
+    - uses: actions/setup-node@v2
       with:
-        node-version: ${{ matrix.version }}
-        cache: yarn
+        node-version: '14'
     - name: Node version
       shell: pwsh
       run: node --version
@@ -25,5 +24,13 @@ jobs:
     - name: Npm version
       shell: pwsh
       run: npm --version
-    - name: Install dependencies
-      run: yarn install
+    - uses: actions/cache@v2
+      name: Yarn cache
+      timeout-minutes: 2
+      with:
+        path: '**/node_modules'
+        key: macos11-yarn-${{ hashFiles('**/yarn.lock') }}
+        restore-keys: |
+          macos11-yarn-
+    - run: yarn install
+      timeout-minutes: 4
