@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,17 +7,17 @@
 
 package com.facebook.react.views.text;
 
-import android.graphics.Typeface;
 import android.os.Build;
 import android.text.Layout;
 import android.text.TextUtils;
 import android.util.LayoutDirection;
 import android.view.Gravity;
 import androidx.annotation.Nullable;
-import com.facebook.react.bridge.JSApplicationIllegalArgumentException;
+import com.facebook.common.logging.FLog;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.common.mapbuffer.ReadableMapBuffer;
+import com.facebook.react.common.ReactConstants;
+import com.facebook.react.common.mapbuffer.MapBuffer;
 import com.facebook.react.uimanager.PixelUtil;
 import com.facebook.react.uimanager.ReactAccessibilityDelegate;
 import com.facebook.react.uimanager.ReactStylesDiffMap;
@@ -48,9 +48,8 @@ public class TextAttributeProps {
   public static final short TA_KEY_BEST_WRITING_DIRECTION = 13;
   public static final short TA_KEY_TEXT_DECORATION_COLOR = 14;
   public static final short TA_KEY_TEXT_DECORATION_LINE = 15;
-  public static final short TA_KEY_TEXT_DECORATION_LINE_STYLE = 16;
-  public static final short TA_KEY_TEXT_DECORATION_LINE_PATTERN = 17;
-  public static final short TA_KEY_TEXT_SHADOW_RAIDUS = 18;
+  public static final short TA_KEY_TEXT_DECORATION_STYLE = 16;
+  public static final short TA_KEY_TEXT_SHADOW_RADIUS = 18;
   public static final short TA_KEY_TEXT_SHADOW_COLOR = 19;
   public static final short TA_KEY_IS_HIGHLIGHTED = 20;
   public static final short TA_KEY_LAYOUT_DIRECTION = 21;
@@ -69,9 +68,10 @@ public class TextAttributeProps {
   private static final int DEFAULT_TEXT_SHADOW_COLOR = 0x55000000;
   private static final int DEFAULT_JUSTIFICATION_MODE =
       (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) ? 0 : Layout.JUSTIFICATION_MODE_NONE;
-
   private static final int DEFAULT_BREAK_STRATEGY =
       (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) ? 0 : Layout.BREAK_STRATEGY_HIGH_QUALITY;
+  private static final int DEFAULT_HYPHENATION_FREQUENCY =
+      (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) ? 0 : Layout.HYPHENATION_FREQUENCY_NONE;
 
   protected float mLineHeight = Float.NaN;
   protected boolean mIsColorSet = false;
@@ -103,13 +103,9 @@ public class TextAttributeProps {
 
   protected @Nullable ReactAccessibilityDelegate.AccessibilityRole mAccessibilityRole = null;
   protected boolean mIsAccessibilityRoleSet = false;
+  protected boolean mIsAccessibilityLink = false;
 
-  /**
-   * mFontStyle can be {@link Typeface#NORMAL} or {@link Typeface#ITALIC}. mFontWeight can be {@link
-   * Typeface#NORMAL} or {@link Typeface#BOLD}.
-   */
   protected int mFontStyle = UNSET;
-
   protected int mFontWeight = UNSET;
   /**
    * NB: If a font family is used that does not have a style in a certain Android version (ie.
@@ -142,51 +138,48 @@ public class TextAttributeProps {
 
   private TextAttributeProps() {}
 
-  /**
-   * Build a TextAttributeProps using data from the {@link ReadableMapBuffer} received as a
-   * parameter.
-   */
-  public static TextAttributeProps fromReadableMapBuffer(ReadableMapBuffer props) {
+  /** Build a TextAttributeProps using data from the {@link MapBuffer} received as a parameter. */
+  public static TextAttributeProps fromMapBuffer(MapBuffer props) {
     TextAttributeProps result = new TextAttributeProps();
 
     // TODO T83483191: Review constants that are not being set!
-    Iterator<ReadableMapBuffer.MapBufferEntry> iterator = props.iterator();
+    Iterator<MapBuffer.Entry> iterator = props.iterator();
     while (iterator.hasNext()) {
-      ReadableMapBuffer.MapBufferEntry entry = iterator.next();
+      MapBuffer.Entry entry = iterator.next();
       switch (entry.getKey()) {
         case TA_KEY_FOREGROUND_COLOR:
-          result.setColor(entry.getInt(0));
+          result.setColor(entry.getIntValue());
           break;
         case TA_KEY_BACKGROUND_COLOR:
-          result.setBackgroundColor(entry.getInt(0));
+          result.setBackgroundColor(entry.getIntValue());
           break;
         case TA_KEY_OPACITY:
           break;
         case TA_KEY_FONT_FAMILY:
-          result.setFontFamily(entry.getString());
+          result.setFontFamily(entry.getStringValue());
           break;
         case TA_KEY_FONT_SIZE:
-          result.setFontSize((float) entry.getDouble(UNSET));
+          result.setFontSize((float) entry.getDoubleValue());
           break;
         case TA_KEY_FONT_SIZE_MULTIPLIER:
           break;
         case TA_KEY_FONT_WEIGHT:
-          result.setFontWeight(entry.getString());
+          result.setFontWeight(entry.getStringValue());
           break;
         case TA_KEY_FONT_STYLE:
-          result.setFontStyle(entry.getString());
+          result.setFontStyle(entry.getStringValue());
           break;
         case TA_KEY_FONT_VARIANT:
-          result.setFontVariant(entry.getReadableMapBuffer());
+          result.setFontVariant(entry.getMapBufferValue());
           break;
         case TA_KEY_ALLOW_FONT_SCALING:
-          result.setAllowFontScaling(entry.getBoolean(true));
+          result.setAllowFontScaling(entry.getBooleanValue());
           break;
         case TA_KEY_LETTER_SPACING:
-          result.setLetterSpacing((float) entry.getDouble(Float.NaN));
+          result.setLetterSpacing((float) entry.getDoubleValue());
           break;
         case TA_KEY_LINE_HEIGHT:
-          result.setLineHeight((float) entry.getDouble(UNSET));
+          result.setLineHeight((float) entry.getDoubleValue());
           break;
         case TA_KEY_ALIGNMENT:
           break;
@@ -195,25 +188,23 @@ public class TextAttributeProps {
         case TA_KEY_TEXT_DECORATION_COLOR:
           break;
         case TA_KEY_TEXT_DECORATION_LINE:
-          result.setTextDecorationLine(entry.getString());
+          result.setTextDecorationLine(entry.getStringValue());
           break;
-        case TA_KEY_TEXT_DECORATION_LINE_STYLE:
+        case TA_KEY_TEXT_DECORATION_STYLE:
           break;
-        case TA_KEY_TEXT_DECORATION_LINE_PATTERN:
-          break;
-        case TA_KEY_TEXT_SHADOW_RAIDUS:
-          result.setTextShadowRadius(entry.getInt(1));
+        case TA_KEY_TEXT_SHADOW_RADIUS:
+          result.setTextShadowRadius((float) entry.getDoubleValue());
           break;
         case TA_KEY_TEXT_SHADOW_COLOR:
-          result.setTextShadowColor(entry.getInt(DEFAULT_TEXT_SHADOW_COLOR));
+          result.setTextShadowColor(entry.getIntValue());
           break;
         case TA_KEY_IS_HIGHLIGHTED:
           break;
         case TA_KEY_LAYOUT_DIRECTION:
-          result.setLayoutDirection(entry.getString());
+          result.setLayoutDirection(entry.getStringValue());
           break;
         case TA_KEY_ACCESSIBILITY_ROLE:
-          result.setAccessibilityRole(entry.getString());
+          result.setAccessibilityRole(entry.getStringValue());
           break;
       }
     }
@@ -251,7 +242,7 @@ public class TextAttributeProps {
     result.setTextDecorationLine(getStringProp(props, ViewProps.TEXT_DECORATION_LINE));
     result.setTextShadowOffset(
         props.hasKey(PROP_SHADOW_OFFSET) ? props.getMap(PROP_SHADOW_OFFSET) : null);
-    result.setTextShadowRadius(getIntProp(props, PROP_SHADOW_RADIUS, 1));
+    result.setTextShadowRadius(getFloatProp(props, PROP_SHADOW_RADIUS, 1));
     result.setTextShadowColor(getIntProp(props, PROP_SHADOW_COLOR, DEFAULT_TEXT_SHADOW_COLOR));
     result.setTextTransform(getStringProp(props, PROP_TEXT_TRANSFORM));
     result.setLayoutDirection(getStringProp(props, ViewProps.LAYOUT_DIRECTION));
@@ -259,35 +250,36 @@ public class TextAttributeProps {
     return result;
   }
 
-  public static int getTextAlignment(ReactStylesDiffMap props, boolean isRTL) {
-    @Nullable
-    String textAlignPropValue =
-        props.hasKey(ViewProps.TEXT_ALIGN) ? props.getString(ViewProps.TEXT_ALIGN) : null;
-    int textAlignment;
+  public static int getTextAlignment(ReactStylesDiffMap props, boolean isRTL, int defaultValue) {
+    if (!props.hasKey(ViewProps.TEXT_ALIGN)) {
+      return defaultValue;
+    }
 
+    String textAlignPropValue = props.getString(ViewProps.TEXT_ALIGN);
     if ("justify".equals(textAlignPropValue)) {
-      textAlignment = Gravity.LEFT;
+      return Gravity.LEFT;
     } else {
       if (textAlignPropValue == null || "auto".equals(textAlignPropValue)) {
-        textAlignment = Gravity.NO_GRAVITY;
+        return Gravity.NO_GRAVITY;
       } else if ("left".equals(textAlignPropValue)) {
-        textAlignment = isRTL ? Gravity.RIGHT : Gravity.LEFT;
+        return isRTL ? Gravity.RIGHT : Gravity.LEFT;
       } else if ("right".equals(textAlignPropValue)) {
-        textAlignment = isRTL ? Gravity.LEFT : Gravity.RIGHT;
+        return isRTL ? Gravity.LEFT : Gravity.RIGHT;
       } else if ("center".equals(textAlignPropValue)) {
-        textAlignment = Gravity.CENTER_HORIZONTAL;
+        return Gravity.CENTER_HORIZONTAL;
       } else {
-        throw new JSApplicationIllegalArgumentException("Invalid textAlign: " + textAlignPropValue);
+        FLog.w(ReactConstants.TAG, "Invalid textAlign: " + textAlignPropValue);
+        return Gravity.NO_GRAVITY;
       }
     }
-    return textAlignment;
   }
 
-  public static int getJustificationMode(ReactStylesDiffMap props) {
-    @Nullable
-    String textAlignPropValue =
-        props.hasKey(ViewProps.TEXT_ALIGN) ? props.getString(ViewProps.TEXT_ALIGN) : null;
+  public static int getJustificationMode(ReactStylesDiffMap props, int defaultValue) {
+    if (!props.hasKey(ViewProps.TEXT_ALIGN)) {
+      return defaultValue;
+    }
 
+    String textAlignPropValue = props.getString(ViewProps.TEXT_ALIGN);
     if ("justify".equals(textAlignPropValue) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       return Layout.JUSTIFICATION_MODE_INTER_WORD;
     }
@@ -426,17 +418,17 @@ public class TextAttributeProps {
     mFontFeatureSettings = ReactTypefaceUtils.parseFontVariant(fontVariant);
   }
 
-  private void setFontVariant(@Nullable ReadableMapBuffer fontVariant) {
+  private void setFontVariant(@Nullable MapBuffer fontVariant) {
     if (fontVariant == null || fontVariant.getCount() == 0) {
       mFontFeatureSettings = null;
       return;
     }
 
     List<String> features = new ArrayList<>();
-    Iterator<ReadableMapBuffer.MapBufferEntry> iterator = fontVariant.iterator();
+    Iterator<MapBuffer.Entry> iterator = fontVariant.iterator();
     while (iterator.hasNext()) {
-      ReadableMapBuffer.MapBufferEntry entry = iterator.next();
-      String value = entry.getString();
+      MapBuffer.Entry entry = iterator.next();
+      String value = entry.getStringValue();
       if (value != null) {
         switch (value) {
           case "small-caps":
@@ -454,45 +446,78 @@ public class TextAttributeProps {
           case "proportional-nums":
             features.add("'pnum'");
             break;
+          case "stylistic-one":
+            features.add("'ss01'");
+            break;
+          case "stylistic-two":
+            features.add("'ss02'");
+            break;
+          case "stylistic-three":
+            features.add("'ss03'");
+            break;
+          case "stylistic-four":
+            features.add("'ss04'");
+            break;
+          case "stylistic-five":
+            features.add("'ss05'");
+            break;
+          case "stylistic-six":
+            features.add("'ss06'");
+            break;
+          case "stylistic-seven":
+            features.add("'ss07'");
+            break;
+          case "stylistic-eight":
+            features.add("'ss08'");
+            break;
+          case "stylistic-nine":
+            features.add("'ss09'");
+            break;
+          case "stylistic-ten":
+            features.add("'ss10'");
+            break;
+          case "stylistic-eleven":
+            features.add("'ss11'");
+            break;
+          case "stylistic-twelve":
+            features.add("'ss12'");
+            break;
+          case "stylistic-thirteen":
+            features.add("'ss13'");
+            break;
+          case "stylistic-fourteen":
+            features.add("'ss14'");
+            break;
+          case "stylistic-fifteen":
+            features.add("'ss15'");
+            break;
+          case "stylistic-sixteen":
+            features.add("'ss16'");
+            break;
+          case "stylistic-seventeen":
+            features.add("'ss17'");
+            break;
+          case "stylistic-eighteen":
+            features.add("'ss18'");
+            break;
+          case "stylistic-nineteen":
+            features.add("'ss19'");
+            break;
+          case "stylistic-twenty":
+            features.add("'ss20'");
+            break;
         }
       }
     }
     mFontFeatureSettings = TextUtils.join(", ", features);
   }
 
-  /**
-   * /* This code is duplicated in ReactTextInputManager /* TODO: Factor into a common place they
-   * can both use
-   */
   private void setFontWeight(@Nullable String fontWeightString) {
-    int fontWeightNumeric =
-        fontWeightString != null ? parseNumericFontWeight(fontWeightString) : -1;
-    int fontWeight = UNSET;
-    if (fontWeightNumeric >= 500 || "bold".equals(fontWeightString)) {
-      fontWeight = Typeface.BOLD;
-    } else if ("normal".equals(fontWeightString)
-        || (fontWeightNumeric != -1 && fontWeightNumeric < 500)) {
-      fontWeight = Typeface.NORMAL;
-    }
-    if (fontWeight != mFontWeight) {
-      mFontWeight = fontWeight;
-    }
+    mFontWeight = ReactTypefaceUtils.parseFontWeight(fontWeightString);
   }
 
-  /**
-   * /* This code is duplicated in ReactTextInputManager /* TODO: Factor into a common place they
-   * can both use
-   */
   private void setFontStyle(@Nullable String fontStyleString) {
-    int fontStyle = UNSET;
-    if ("italic".equals(fontStyleString)) {
-      fontStyle = Typeface.ITALIC;
-    } else if ("normal".equals(fontStyleString)) {
-      fontStyle = Typeface.NORMAL;
-    }
-    if (fontStyle != mFontStyle) {
-      mFontStyle = fontStyle;
-    }
+    mFontStyle = ReactTypefaceUtils.parseFontStyle(fontStyleString);
   }
 
   private void setIncludeFontPadding(boolean includepad) {
@@ -540,8 +565,8 @@ public class TextAttributeProps {
     } else if ("ltr".equals(layoutDirection)) {
       androidLayoutDirection = LayoutDirection.LTR;
     } else {
-      throw new JSApplicationIllegalArgumentException(
-          "Invalid layoutDirection: " + layoutDirection);
+      FLog.w(ReactConstants.TAG, "Invalid layoutDirection: " + layoutDirection);
+      androidLayoutDirection = UNSET;
     }
     return androidLayoutDirection;
   }
@@ -572,15 +597,18 @@ public class TextAttributeProps {
     } else if ("capitalize".equals(textTransform)) {
       mTextTransform = TextTransform.CAPITALIZE;
     } else {
-      throw new JSApplicationIllegalArgumentException("Invalid textTransform: " + textTransform);
+      FLog.w(ReactConstants.TAG, "Invalid textTransform: " + textTransform);
+      mTextTransform = TextTransform.NONE;
     }
   }
 
   private void setAccessibilityRole(@Nullable String accessibilityRole) {
     if (accessibilityRole != null) {
-      mIsAccessibilityRoleSet = accessibilityRole != null;
+      mIsAccessibilityRoleSet = true;
       mAccessibilityRole =
           ReactAccessibilityDelegate.AccessibilityRole.fromValue(accessibilityRole);
+      mIsAccessibilityLink =
+          mAccessibilityRole.equals(ReactAccessibilityDelegate.AccessibilityRole.LINK);
     }
   }
 
@@ -602,20 +630,21 @@ public class TextAttributeProps {
     return androidTextBreakStrategy;
   }
 
-  /**
-   * Return -1 if the input string is not a valid numeric fontWeight (100, 200, ..., 900), otherwise
-   * return the weight.
-   *
-   * <p>This code is duplicated in ReactTextInputManager TODO: Factor into a common place they can
-   * both use
-   */
-  private static int parseNumericFontWeight(String fontWeightString) {
-    // This should be much faster than using regex to verify input and Integer.parseInt
-    return fontWeightString.length() == 3
-            && fontWeightString.endsWith("00")
-            && fontWeightString.charAt(0) <= '9'
-            && fontWeightString.charAt(0) >= '1'
-        ? 100 * (fontWeightString.charAt(0) - '0')
-        : -1;
+  public static int getHyphenationFrequency(@Nullable String hyphenationFrequency) {
+    int androidHyphenationFrequency = DEFAULT_HYPHENATION_FREQUENCY;
+    if (hyphenationFrequency != null) {
+      switch (hyphenationFrequency) {
+        case "none":
+          androidHyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NONE;
+          break;
+        case "normal":
+          androidHyphenationFrequency = Layout.HYPHENATION_FREQUENCY_NORMAL;
+          break;
+        default:
+          androidHyphenationFrequency = Layout.HYPHENATION_FREQUENCY_FULL;
+          break;
+      }
+    }
+    return androidHyphenationFrequency;
   }
 }

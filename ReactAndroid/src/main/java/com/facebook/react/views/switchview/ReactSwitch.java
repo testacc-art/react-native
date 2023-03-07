@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,9 +7,11 @@
 
 package com.facebook.react.views.switchview;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.PorterDuff;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
@@ -48,6 +50,14 @@ import androidx.appcompat.widget.SwitchCompat;
     }
   }
 
+  @Override
+  @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+  public void setBackgroundColor(int color) {
+    setBackground(
+        new RippleDrawable(
+            createRippleDrawableColorStateList(color), new ColorDrawable(color), null));
+  }
+
   void setColor(Drawable drawable, @Nullable Integer color) {
     if (color == null) {
       drawable.clearColorFilter();
@@ -63,14 +73,10 @@ import androidx.appcompat.widget.SwitchCompat;
   public void setThumbColor(@Nullable Integer color) {
     setColor(super.getThumbDrawable(), color);
 
-    // Set the ripple color with thumb color if >= LOLLIPOP
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-      RippleDrawable ripple = (RippleDrawable) super.getBackground();
-      ColorStateList customColorState =
-          new ColorStateList(
-              new int[][] {new int[] {android.R.attr.state_pressed}}, new int[] {color});
-
-      ripple.setColor(customColorState);
+    // Set the ripple color if background is instance of RippleDrawable
+    if (color != null && super.getBackground() instanceof RippleDrawable) {
+      ColorStateList customColorState = createRippleDrawableColorStateList(color);
+      ((RippleDrawable) super.getBackground()).setColor(customColorState);
     }
   }
 
@@ -112,5 +118,10 @@ import androidx.appcompat.widget.SwitchCompat;
       Integer currentTrackColor = checked ? mTrackColorForTrue : mTrackColorForFalse;
       setTrackColor(currentTrackColor);
     }
+  }
+
+  private ColorStateList createRippleDrawableColorStateList(@Nullable Integer color) {
+    return new ColorStateList(
+        new int[][] {new int[] {android.R.attr.state_pressed}}, new int[] {color});
   }
 }

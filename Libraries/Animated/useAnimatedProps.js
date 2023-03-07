@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -10,10 +10,18 @@
 
 'use strict';
 
-import AnimatedProps from './nodes/AnimatedProps';
-import {AnimatedEvent} from './AnimatedEvent';
 import useRefEffect from '../Utilities/useRefEffect';
-import {useCallback, useLayoutEffect, useMemo, useReducer, useRef} from 'react';
+import {AnimatedEvent} from './AnimatedEvent';
+import NativeAnimatedHelper from './NativeAnimatedHelper';
+import AnimatedProps from './nodes/AnimatedProps';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+} from 'react';
 
 type ReducedProps<TProps> = {
   ...TProps,
@@ -25,7 +33,7 @@ type CallbackRef<T> = T => mixed;
 export default function useAnimatedProps<TProps: {...}, TInstance>(
   props: TProps,
 ): [ReducedProps<TProps>, CallbackRef<TInstance | null>] {
-  const [, scheduleUpdate] = useReducer(count => count + 1, 0);
+  const [, scheduleUpdate] = useReducer<number, void>(count => count + 1, 0);
   const onUpdateRef = useRef<?() => void>(null);
 
   // TODO: Only invalidate `node` if animated props or `style` change. In the
@@ -52,7 +60,7 @@ export default function useAnimatedProps<TProps: {...}, TInstance>(
   // But there is no way to transparently compose three separate callback refs,
   // so we just combine them all into one for now.
   const refEffect = useCallback(
-    instance => {
+    (instance: TInstance) => {
       // NOTE: This may be called more often than necessary (e.g. when `props`
       // changes), but `setNativeView` already optimizes for that.
       node.setNativeView(instance);
@@ -71,6 +79,7 @@ export default function useAnimatedProps<TProps: {...}, TInstance>(
           scheduleUpdate();
         } else if (!node.__isNative) {
           // $FlowIgnore[not-a-function] - Assume it's still a function.
+          // $FlowFixMe[incompatible-use]
           instance.setNativeProps(node.__getAnimatedValue());
         } else {
           throw new Error(
@@ -128,6 +137,13 @@ function reduceAnimatedProps<TProps>(
 function useAnimatedPropsLifecycle(node: AnimatedProps): void {
   const prevNodeRef = useRef<?AnimatedProps>(null);
   const isUnmountingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    // It is ok for multiple components to call `flushQueue` because it noops
+    // if the queue is empty. When multiple animated components are mounted at
+    // the same time. Only first component flushes the queue and the others will noop.
+    NativeAnimatedHelper.API.flushQueue();
+  });
 
   useLayoutEffect(() => {
     isUnmountingRef.current = false;

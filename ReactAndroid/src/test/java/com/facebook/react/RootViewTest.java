@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,15 +7,17 @@
 
 package com.facebook.react;
 
-import static org.fest.assertions.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import android.graphics.Rect;
 import android.view.MotionEvent;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.CatalystInstance;
@@ -25,6 +27,7 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.bridge.ReactTestHelper;
 import com.facebook.react.bridge.WritableArray;
+import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.common.SystemClock;
 import com.facebook.react.uimanager.DisplayMetricsHolder;
 import com.facebook.react.uimanager.UIManagerModule;
@@ -37,6 +40,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.powermock.api.mockito.PowerMockito;
@@ -87,7 +91,7 @@ public class RootViewTest {
             });
 
     mCatalystInstanceMock = ReactTestHelper.createMockCatalystInstance();
-    mReactContext = new ReactApplicationContext(RuntimeEnvironment.application);
+    mReactContext = spy(new ReactApplicationContext(RuntimeEnvironment.application));
     mReactContext.initializeWithInstance(mCatalystInstanceMock);
     DisplayMetricsHolder.initDisplayMetricsIfNotInitialized(mReactContext);
 
@@ -208,5 +212,41 @@ public class RootViewTest {
     rootView.startReactApplication(instanceManager, "");
     rootView.unmountReactApplication();
     rootView.startReactApplication(instanceManager, "");
+  }
+
+  @Test
+  public void testCheckForKeyboardEvents() {
+    ReactInstanceManager instanceManager = mock(ReactInstanceManager.class);
+
+    when(instanceManager.getCurrentReactContext()).thenReturn(mReactContext);
+    ReactRootView rootView =
+        new ReactRootView(mReactContext) {
+          @Override
+          public void getWindowVisibleDisplayFrame(Rect outRect) {
+            if (outRect.bottom == 0) {
+              outRect.bottom += 100;
+              outRect.right += 370;
+            } else {
+              outRect.bottom += 370;
+            }
+          }
+        };
+
+    rootView.startReactApplication(instanceManager, "");
+    rootView.simulateCheckForKeyboardForTesting();
+
+    WritableMap params = Arguments.createMap();
+    WritableMap endCoordinates = Arguments.createMap();
+    double screenHeight = 470.0;
+    double keyboardHeight = 100.0;
+    params.putDouble("duration", 0.0);
+    endCoordinates.putDouble("width", screenHeight - keyboardHeight);
+    endCoordinates.putDouble("screenX", 0.0);
+    endCoordinates.putDouble("height", screenHeight - keyboardHeight);
+    endCoordinates.putDouble("screenY", keyboardHeight);
+    params.putMap("endCoordinates", endCoordinates);
+    params.putString("easing", "keyboard");
+
+    verify(mReactContext, Mockito.times(1)).emitDeviceEvent("keyboardDidShow", params);
   }
 }

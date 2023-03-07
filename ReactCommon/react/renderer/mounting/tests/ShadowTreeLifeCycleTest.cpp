@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,10 +12,11 @@
 
 #include <react/renderer/components/root/RootComponentDescriptor.h>
 #include <react/renderer/components/view/ViewComponentDescriptor.h>
+#include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/mounting/Differentiator.h>
 #include <react/renderer/mounting/ShadowViewMutation.h>
-#include <react/renderer/mounting/stubs.h>
 
+#include <react/renderer/mounting/stubs.h>
 #include <react/test_utils/Entropy.h>
 #include <react/test_utils/shadowTreeGeneration.h>
 
@@ -23,8 +24,7 @@
 // #include <algorithm>
 // #include <random>
 
-namespace facebook {
-namespace react {
+namespace facebook::react {
 
 static void testShadowNodeTreeLifeCycle(
     uint_fast32_t seed,
@@ -44,6 +44,8 @@ static void testShadowNodeTreeLifeCycle(
   auto noopEventEmitter =
       std::make_shared<ViewEventEmitter const>(nullptr, -1, eventDispatcher);
 
+  PropsParserContext parserContext{-1, *contextContainer};
+
   auto allNodes = std::vector<ShadowNode::Shared>{};
 
   for (int i = 0; i < repeats; i++) {
@@ -61,6 +63,7 @@ static void testShadowNodeTreeLifeCycle(
 
     // Applying size constraints.
     emptyRootNode = emptyRootNode->clone(
+        parserContext,
         LayoutConstraints{
             Size{512, 0}, Size{512, std::numeric_limits<Float>::infinity()}},
         LayoutContext{});
@@ -73,8 +76,8 @@ static void testShadowNodeTreeLifeCycle(
     auto currentRootNode = std::static_pointer_cast<RootShadowNode const>(
         emptyRootNode->ShadowNode::clone(ShadowNodeFragment{
             ShadowNodeFragment::propsPlaceholder(),
-            std::make_shared<SharedShadowNodeList>(
-                SharedShadowNodeList{singleRootChildNode})}));
+            std::make_shared<ShadowNode::ListOfShared>(
+                ShadowNode::ListOfShared{singleRootChildNode})}));
 
     // Building an initial view hierarchy.
     auto viewTree = buildStubViewTreeWithoutUsingDifferentiator(*emptyRootNode);
@@ -191,6 +194,8 @@ static void testShadowNodeTreeLifeCycleExtensiveFlatteningUnflattening(
   auto noopEventEmitter =
       std::make_shared<ViewEventEmitter const>(nullptr, -1, eventDispatcher);
 
+  PropsParserContext parserContext{-1, *contextContainer};
+
   auto allNodes = std::vector<ShadowNode::Shared>{};
 
   for (int i = 0; i < repeats; i++) {
@@ -208,6 +213,7 @@ static void testShadowNodeTreeLifeCycleExtensiveFlatteningUnflattening(
 
     // Applying size constraints.
     emptyRootNode = emptyRootNode->clone(
+        parserContext,
         LayoutConstraints{
             Size{512, 0}, Size{512, std::numeric_limits<Float>::infinity()}},
         LayoutContext{});
@@ -220,8 +226,8 @@ static void testShadowNodeTreeLifeCycleExtensiveFlatteningUnflattening(
     auto currentRootNode = std::static_pointer_cast<RootShadowNode const>(
         emptyRootNode->ShadowNode::clone(ShadowNodeFragment{
             ShadowNodeFragment::propsPlaceholder(),
-            std::make_shared<SharedShadowNodeList>(
-                SharedShadowNodeList{singleRootChildNode})}));
+            std::make_shared<ShadowNode::ListOfShared>(
+                ShadowNode::ListOfShared{singleRootChildNode})}));
 
     // Building an initial view hierarchy.
     auto viewTree = buildStubViewTreeWithoutUsingDifferentiator(*emptyRootNode);
@@ -321,8 +327,7 @@ static void testShadowNodeTreeLifeCycleExtensiveFlatteningUnflattening(
   SUCCEED();
 }
 
-} // namespace react
-} // namespace facebook
+} // namespace facebook::react
 
 using namespace facebook::react;
 

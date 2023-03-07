@@ -1,17 +1,18 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
 
 #include "RuntimeSchedulerBinding.h"
-#include "SchedulerPriority.h"
+#include <ReactCommon/SchedulerPriority.h>
+#include "SchedulerPriorityUtils.h"
 #include "primitives.h"
 
-#include <react/debug/react_native_assert.h>
 #include <chrono>
 #include <memory>
+#include <utility>
 
 namespace facebook::react {
 
@@ -41,9 +42,27 @@ RuntimeSchedulerBinding::createAndInstallIfNeeded(
   return runtimeSchedulerObject.getHostObject<RuntimeSchedulerBinding>(runtime);
 }
 
+std::shared_ptr<RuntimeSchedulerBinding> RuntimeSchedulerBinding::getBinding(
+    jsi::Runtime &runtime) {
+  auto runtimeSchedulerModuleName = "nativeRuntimeScheduler";
+
+  auto runtimeSchedulerValue =
+      runtime.global().getProperty(runtime, runtimeSchedulerModuleName);
+  if (runtimeSchedulerValue.isUndefined()) {
+    return nullptr;
+  }
+
+  auto runtimeSchedulerObject = runtimeSchedulerValue.asObject(runtime);
+  return runtimeSchedulerObject.getHostObject<RuntimeSchedulerBinding>(runtime);
+}
+
 RuntimeSchedulerBinding::RuntimeSchedulerBinding(
-    std::shared_ptr<RuntimeScheduler> const &runtimeScheduler)
-    : runtimeScheduler_(runtimeScheduler) {}
+    std::shared_ptr<RuntimeScheduler> runtimeScheduler)
+    : runtimeScheduler_(std::move(runtimeScheduler)) {}
+
+bool RuntimeSchedulerBinding::getIsSynchronous() const {
+  return runtimeScheduler_->getIsSynchronous();
+}
 
 jsi::Value RuntimeSchedulerBinding::get(
     jsi::Runtime &runtime,
@@ -80,7 +99,7 @@ jsi::Value RuntimeSchedulerBinding::get(
             jsi::Value const &,
             jsi::Value const *arguments,
             size_t) noexcept -> jsi::Value {
-          runtimeScheduler_->cancelTask(taskFromValue(runtime, arguments[0]));
+          runtimeScheduler_->cancelTask(*taskFromValue(runtime, arguments[0]));
           return jsi::Value::undefined();
         });
   }
@@ -96,7 +115,7 @@ jsi::Value RuntimeSchedulerBinding::get(
             jsi::Value const *,
             size_t) noexcept -> jsi::Value {
           auto shouldYield = runtimeScheduler_->getShouldYield();
-          return jsi::Value(shouldYield);
+          return {shouldYield};
         });
   }
 
@@ -128,13 +147,25 @@ jsi::Value RuntimeSchedulerBinding::get(
           auto asDouble =
               std::chrono::duration<double, std::milli>(now.time_since_epoch())
                   .count();
-          return jsi::Value(asDouble);
+          return {asDouble};
         });
   }
 
+  // TODO: remmove this, as it's deprecated in the JS scheduler
   if (propertyName == "unstable_getCurrentPriorityLevel") {
-    auto currentPriorityLevel = runtimeScheduler_->getCurrentPriorityLevel();
-    return jsi::Value(runtime, serialize(currentPriorityLevel));
+    return jsi::Function::createFromHostFunction(
+        runtime,
+        name,
+        0,
+        [this](
+            jsi::Runtime &runtime,
+            jsi::Value const &,
+            jsi::Value const *,
+            size_t) noexcept -> jsi::Value {
+          auto currentPriorityLevel =
+              runtimeScheduler_->getCurrentPriorityLevel();
+          return jsi::Value(runtime, serialize(currentPriorityLevel));
+        });
   }
 
   if (propertyName == "unstable_ImmediatePriority") {
@@ -162,8 +193,11 @@ jsi::Value RuntimeSchedulerBinding::get(
     return jsi::Value::undefined();
   }
 
-  react_native_assert(false && "undefined property");
+#ifdef REACT_NATIVE_DEBUG
+  throw std::runtime_error("undefined property");
+#else
   return jsi::Value::undefined();
+#endif
 }
 
 } // namespace facebook::react

@@ -1,12 +1,14 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
- * @format
+ * @noformat
  * @flow strict-local
- * @generated SignedSource<<745b7b5c173d0bc75b6d97938c98728d>>
+ * @generated SignedSource<<e5e369f149ed8206141b7a3c2855bb85>>
+ *
+ * This file was sync'd from the facebook/react repository.
  */
 
 'use strict';
@@ -24,7 +26,7 @@ const {register} = ReactNativeViewConfigRegistry;
  * @param {string} config iOS View configuration.
  * @private
  */
-const createReactNativeComponentClass = function(
+const createReactNativeComponentClass = function (
   name: string,
   callback: () => ViewConfig,
 ): string {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,17 +9,17 @@
 
 #include <folly/Conv.h>
 #include <folly/dynamic.h>
-#include <react/debug/react_native_assert.h>
+#include <react/debug/react_native_expect.h>
 #include <react/renderer/attributedstring/AttributedString.h>
 #include <react/renderer/attributedstring/ParagraphAttributes.h>
 #include <react/renderer/attributedstring/TextAttributes.h>
 #include <react/renderer/attributedstring/conversions.h>
 #include <react/renderer/attributedstring/primitives.h>
 #include <react/renderer/core/LayoutableShadowNode.h>
+#include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/core/ShadowNode.h>
 #include <react/renderer/core/conversions.h>
 #include <react/renderer/core/propsConversions.h>
-#include <react/renderer/graphics/Geometry.h>
 #include <react/renderer/graphics/conversions.h>
 #include <cmath>
 
@@ -32,6 +32,84 @@
 
 namespace facebook {
 namespace react {
+
+inline std::string toString(const DynamicTypeRamp &dynamicTypeRamp) {
+  switch (dynamicTypeRamp) {
+    case DynamicTypeRamp::Caption2:
+      return "caption2";
+    case DynamicTypeRamp::Caption1:
+      return "caption1";
+    case DynamicTypeRamp::Footnote:
+      return "footnote";
+    case DynamicTypeRamp::Subheadline:
+      return "subheadline";
+    case DynamicTypeRamp::Callout:
+      return "callout";
+    case DynamicTypeRamp::Body:
+      return "body";
+    case DynamicTypeRamp::Headline:
+      return "headline";
+    case DynamicTypeRamp::Title3:
+      return "title3";
+    case DynamicTypeRamp::Title2:
+      return "title2";
+    case DynamicTypeRamp::Title1:
+      return "title1";
+    case DynamicTypeRamp::LargeTitle:
+      return "largeTitle";
+  }
+
+  LOG(ERROR) << "Unsupported DynamicTypeRamp value";
+  react_native_expect(false);
+
+  // Sane default in case of parsing errors
+  return "body";
+}
+
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    DynamicTypeRamp &result) {
+  react_native_expect(value.hasType<std::string>());
+  if (value.hasType<std::string>()) {
+    auto string = (std::string)value;
+    if (string == "caption2") {
+      result = DynamicTypeRamp::Caption2;
+    } else if (string == "caption1") {
+      result = DynamicTypeRamp::Caption1;
+    } else if (string == "footnote") {
+      result = DynamicTypeRamp::Footnote;
+    } else if (string == "subheadline") {
+      result = DynamicTypeRamp::Subheadline;
+    } else if (string == "callout") {
+      result = DynamicTypeRamp::Callout;
+    } else if (string == "body") {
+      result = DynamicTypeRamp::Body;
+    } else if (string == "headline") {
+      result = DynamicTypeRamp::Headline;
+    } else if (string == "title3") {
+      result = DynamicTypeRamp::Title3;
+    } else if (string == "title2") {
+      result = DynamicTypeRamp::Title2;
+    } else if (string == "title1") {
+      result = DynamicTypeRamp::Title1;
+    } else if (string == "largeTitle") {
+      result = DynamicTypeRamp::LargeTitle;
+    } else {
+      // sane default
+      LOG(ERROR) << "Unsupported DynamicTypeRamp value: " << string;
+      react_native_expect(false);
+      result = DynamicTypeRamp::Body;
+    }
+    return;
+  }
+
+  LOG(ERROR) << "Unsupported DynamicTypeRamp type";
+  react_native_expect(false);
+
+  // Sane default in case of parsing errors
+  result = DynamicTypeRamp::Body;
+}
 
 inline std::string toString(const EllipsizeMode &ellipsisMode) {
   switch (ellipsisMode) {
@@ -46,14 +124,17 @@ inline std::string toString(const EllipsizeMode &ellipsisMode) {
   }
 
   LOG(ERROR) << "Unsupported EllipsizeMode value";
-  react_native_assert(false);
+  react_native_expect(false);
 
   // Sane default in case of parsing errors
   return "tail";
 }
 
-inline void fromRawValue(const RawValue &value, EllipsizeMode &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    EllipsizeMode &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "clip") {
@@ -67,14 +148,14 @@ inline void fromRawValue(const RawValue &value, EllipsizeMode &result) {
     } else {
       // sane default
       LOG(ERROR) << "Unsupported EllipsizeMode value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       result = EllipsizeMode::Tail;
     }
     return;
   }
 
   LOG(ERROR) << "Unsupported EllipsizeMode type";
-  react_native_assert(false);
+  react_native_expect(false);
 
   // Sane default in case of parsing errors
   result = EllipsizeMode::Tail;
@@ -91,12 +172,15 @@ inline std::string toString(const TextBreakStrategy &textBreakStrategy) {
   }
 
   LOG(ERROR) << "Unsupported TextBreakStrategy value";
-  react_native_assert(false);
-  return "simple";
+  react_native_expect(false);
+  return "highQuality";
 }
 
-inline void fromRawValue(const RawValue &value, TextBreakStrategy &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    TextBreakStrategy &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "simple") {
@@ -108,19 +192,22 @@ inline void fromRawValue(const RawValue &value, TextBreakStrategy &result) {
     } else {
       // sane default
       LOG(ERROR) << "Unsupported TextBreakStrategy value: " << string;
-      react_native_assert(false);
-      result = TextBreakStrategy::Simple;
+      react_native_expect(false);
+      result = TextBreakStrategy::HighQuality;
     }
     return;
   }
 
   LOG(ERROR) << "Unsupported TextBreakStrategy type";
-  react_native_assert(false);
-  result = TextBreakStrategy::Simple;
+  react_native_expect(false);
+  result = TextBreakStrategy::HighQuality;
 }
 
-inline void fromRawValue(const RawValue &value, FontWeight &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    FontWeight &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "normal") {
@@ -149,7 +236,7 @@ inline void fromRawValue(const RawValue &value, FontWeight &result) {
       result = FontWeight::Weight900;
     } else {
       LOG(ERROR) << "Unsupported FontWeight value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       // sane default for prod
       result = FontWeight::Regular;
     }
@@ -157,7 +244,7 @@ inline void fromRawValue(const RawValue &value, FontWeight &result) {
   }
 
   LOG(ERROR) << "Unsupported FontWeight type";
-  react_native_assert(false);
+  react_native_expect(false);
   result = FontWeight::Regular;
 }
 
@@ -165,8 +252,11 @@ inline std::string toString(const FontWeight &fontWeight) {
   return folly::to<std::string>((int)fontWeight);
 }
 
-inline void fromRawValue(const RawValue &value, FontStyle &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    FontStyle &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "normal") {
@@ -177,7 +267,7 @@ inline void fromRawValue(const RawValue &value, FontStyle &result) {
       result = FontStyle::Oblique;
     } else {
       LOG(ERROR) << "Unsupported FontStyle value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       // sane default for prod
       result = FontStyle::Normal;
     }
@@ -185,7 +275,7 @@ inline void fromRawValue(const RawValue &value, FontStyle &result) {
   }
 
   LOG(ERROR) << "Unsupported FontStyle type";
-  react_native_assert(false);
+  react_native_expect(false);
   // sane default for prod
   result = FontStyle::Normal;
 }
@@ -201,14 +291,17 @@ inline std::string toString(const FontStyle &fontStyle) {
   }
 
   LOG(ERROR) << "Unsupported FontStyle value";
-  react_native_assert(false);
+  react_native_expect(false);
   // sane default for prod
   return "normal";
 }
 
-inline void fromRawValue(const RawValue &value, FontVariant &result) {
-  react_native_assert(value.hasType<std::vector<std::string>>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    FontVariant &result) {
   result = FontVariant::Default;
+  react_native_expect(value.hasType<std::vector<std::string>>());
   if (value.hasType<std::vector<std::string>>()) {
     auto items = std::vector<std::string>{value};
     for (const auto &item : items) {
@@ -225,7 +318,7 @@ inline void fromRawValue(const RawValue &value, FontVariant &result) {
             (FontVariant)((int)result | (int)FontVariant::ProportionalNums);
       } else {
         LOG(ERROR) << "Unsupported FontVariant value: " << item;
-        react_native_assert(false);
+        react_native_expect(false);
       }
       continue;
     }
@@ -260,8 +353,63 @@ inline std::string toString(const FontVariant &fontVariant) {
   return result;
 }
 
-inline void fromRawValue(const RawValue &value, TextAlignment &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    TextTransform &result) {
+  react_native_expect(value.hasType<std::string>());
+  if (value.hasType<std::string>()) {
+    auto string = (std::string)value;
+    if (string == "none") {
+      result = TextTransform::None;
+    } else if (string == "uppercase") {
+      result = TextTransform::Uppercase;
+    } else if (string == "lowercase") {
+      result = TextTransform::Lowercase;
+    } else if (string == "capitalize") {
+      result = TextTransform::Capitalize;
+    } else if (string == "unset") {
+      result = TextTransform::Unset;
+    } else {
+      LOG(ERROR) << "Unsupported TextTransform value: " << string;
+      react_native_expect(false);
+      // sane default for prod
+      result = TextTransform::None;
+    }
+    return;
+  }
+
+  LOG(ERROR) << "Unsupported TextTransform type";
+  react_native_expect(false);
+  // sane default for prod
+  result = TextTransform::None;
+}
+
+inline std::string toString(const TextTransform &textTransform) {
+  switch (textTransform) {
+    case TextTransform::None:
+      return "none";
+    case TextTransform::Uppercase:
+      return "uppercase";
+    case TextTransform::Lowercase:
+      return "lowercase";
+    case TextTransform::Capitalize:
+      return "capitalize";
+    case TextTransform::Unset:
+      return "unset";
+  }
+
+  LOG(ERROR) << "Unsupported TextTransform value";
+  react_native_expect(false);
+  // sane default for prod
+  return "none";
+}
+
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    TextAlignment &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "auto") {
@@ -276,7 +424,7 @@ inline void fromRawValue(const RawValue &value, TextAlignment &result) {
       result = TextAlignment::Justified;
     } else {
       LOG(ERROR) << "Unsupported TextAlignment value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       // sane default for prod
       result = TextAlignment::Natural;
     }
@@ -307,8 +455,11 @@ inline std::string toString(const TextAlignment &textAlignment) {
   return "auto";
 }
 
-inline void fromRawValue(const RawValue &value, WritingDirection &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    WritingDirection &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "natural" || string == "auto") {
@@ -319,7 +470,7 @@ inline void fromRawValue(const RawValue &value, WritingDirection &result) {
       result = WritingDirection::RightToLeft;
     } else {
       LOG(ERROR) << "Unsupported WritingDirection value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       // sane default for prod
       result = WritingDirection::Natural;
     }
@@ -347,9 +498,56 @@ inline std::string toString(const WritingDirection &writingDirection) {
 }
 
 inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    LineBreakStrategy &result) {
+  react_native_expect(value.hasType<std::string>());
+  if (value.hasType<std::string>()) {
+    auto string = (std::string)value;
+    if (string == "none") {
+      result = LineBreakStrategy::None;
+    } else if (string == "push-out") {
+      result = LineBreakStrategy::PushOut;
+    } else if (string == "hangul-word") {
+      result = LineBreakStrategy::HangulWordPriority;
+    } else if (string == "standard") {
+      result = LineBreakStrategy::Standard;
+    } else {
+      LOG(ERROR) << "Unsupported LineBreakStrategy value: " << string;
+      react_native_expect(false);
+      // sane default for prod
+      result = LineBreakStrategy::None;
+    }
+    return;
+  }
+
+  LOG(ERROR) << "Unsupported LineBreakStrategy type";
+  // sane default for prod
+  result = LineBreakStrategy::None;
+}
+
+inline std::string toString(const LineBreakStrategy &lineBreakStrategy) {
+  switch (lineBreakStrategy) {
+    case LineBreakStrategy::None:
+      return "none";
+    case LineBreakStrategy::PushOut:
+      return "push-out";
+    case LineBreakStrategy::HangulWordPriority:
+      return "hangul-word";
+    case LineBreakStrategy::Standard:
+      return "standard";
+  }
+
+  LOG(ERROR) << "Unsupported LineBreakStrategy value";
+  // sane default for prod
+  return "none";
+}
+
+inline void fromRawValue(
+    const PropsParserContext &context,
     const RawValue &value,
     TextDecorationLineType &result) {
-  react_native_assert(value.hasType<std::string>());
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "none") {
@@ -366,7 +564,7 @@ inline void fromRawValue(
       result = TextDecorationLineType::UnderlineStrikethrough;
     } else {
       LOG(ERROR) << "Unsupported TextDecorationLineType value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       // sane default for prod
       result = TextDecorationLineType::None;
     }
@@ -392,101 +590,54 @@ inline std::string toString(
   }
 
   LOG(ERROR) << "Unsupported TextDecorationLineType value";
-  react_native_assert(false);
+  react_native_expect(false);
   // sane default for prod
   return "none";
 }
 
 inline void fromRawValue(
+    const PropsParserContext &context,
     const RawValue &value,
-    TextDecorationLineStyle &result) {
-  react_native_assert(value.hasType<std::string>());
-  if (value.hasType<std::string>()) {
-    auto string = (std::string)value;
-    if (string == "single") {
-      result = TextDecorationLineStyle::Single;
-    } else if (string == "thick") {
-      result = TextDecorationLineStyle::Thick;
-    } else if (string == "double") {
-      result = TextDecorationLineStyle::Double;
-    } else {
-      LOG(ERROR) << "Unsupported TextDecorationLineStyle value: " << string;
-      react_native_assert(false);
-      // sane default for prod
-      result = TextDecorationLineStyle::Single;
-    }
-    return;
-  }
-
-  LOG(ERROR) << "Unsupported TextDecorationLineStyle type";
-  // sane default for prod
-  result = TextDecorationLineStyle::Single;
-}
-
-inline std::string toString(
-    const TextDecorationLineStyle &textDecorationLineStyle) {
-  switch (textDecorationLineStyle) {
-    case TextDecorationLineStyle::Single:
-      return "single";
-    case TextDecorationLineStyle::Thick:
-      return "thick";
-    case TextDecorationLineStyle::Double:
-      return "double";
-  }
-
-  LOG(ERROR) << "Unsupported TextDecorationLineStyle value";
-  react_native_assert(false);
-  // sane default for prod
-  return "single";
-}
-
-inline void fromRawValue(
-    const RawValue &value,
-    TextDecorationLinePattern &result) {
-  react_native_assert(value.hasType<std::string>());
+    TextDecorationStyle &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "solid") {
-      result = TextDecorationLinePattern::Solid;
-    } else if (string == "dot") {
-      result = TextDecorationLinePattern::Dot;
-    } else if (string == "dash") {
-      result = TextDecorationLinePattern::Dash;
-    } else if (string == "dash-dot") {
-      result = TextDecorationLinePattern::DashDot;
-    } else if (string == "dash-dot-dot") {
-      result = TextDecorationLinePattern::DashDotDot;
+      result = TextDecorationStyle::Solid;
+    } else if (string == "double") {
+      result = TextDecorationStyle::Double;
+    } else if (string == "dotted") {
+      result = TextDecorationStyle::Dotted;
+    } else if (string == "dashed") {
+      result = TextDecorationStyle::Dashed;
     } else {
-      LOG(ERROR) << "Unsupported TextDecorationLinePattern value: " << string;
-      react_native_assert(false);
+      LOG(ERROR) << "Unsupported TextDecorationStyle value: " << string;
+      react_native_expect(false);
       // sane default for prod
-      result = TextDecorationLinePattern::Solid;
+      result = TextDecorationStyle::Solid;
     }
     return;
   }
 
-  LOG(ERROR) << "Unsupported TextDecorationLineStyle type";
+  LOG(ERROR) << "Unsupported TextDecorationStyle type";
   // sane default for prod
-  result = TextDecorationLinePattern::Solid;
+  result = TextDecorationStyle::Solid;
 }
 
-inline std::string toString(
-    const TextDecorationLinePattern &textDecorationLinePattern) {
-  switch (textDecorationLinePattern) {
-    case TextDecorationLinePattern::Solid:
+inline std::string toString(const TextDecorationStyle &textDecorationStyle) {
+  switch (textDecorationStyle) {
+    case TextDecorationStyle::Solid:
       return "solid";
-    case TextDecorationLinePattern::Dot:
-      return "dot";
-    case TextDecorationLinePattern::Dash:
-      return "dash";
-    case TextDecorationLinePattern::DashDot:
-      return "dash-dot";
-    case TextDecorationLinePattern::DashDotDot:
-      return "dash-dot-dot";
+    case TextDecorationStyle::Double:
+      return "double";
+    case TextDecorationStyle::Dotted:
+      return "dotted";
+    case TextDecorationStyle::Dashed:
+      return "dashed";
   }
 
-  LOG(ERROR) << "Unsupported TextDecorationLinePattern value";
-  react_native_assert(false);
+  LOG(ERROR) << "Unsupported TextDecorationStyle value";
+  react_native_expect(false);
   // sane default for prod
   return "solid";
 }
@@ -541,6 +692,8 @@ inline std::string toString(const AccessibilityRole &accessibilityRole) {
       return "switch";
     case AccessibilityRole::Tab:
       return "tab";
+    case AccessibilityRole::TabBar:
+      return "tabbar";
     case AccessibilityRole::Tablist:
       return "tablist";
     case AccessibilityRole::Timer:
@@ -550,18 +703,21 @@ inline std::string toString(const AccessibilityRole &accessibilityRole) {
   }
 
   LOG(ERROR) << "Unsupported AccessibilityRole value";
-  react_native_assert(false);
+  react_native_expect(false);
   // sane default for prod
   return "none";
 }
 
-inline void fromRawValue(const RawValue &value, AccessibilityRole &result) {
-  react_native_assert(value.hasType<std::string>());
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    AccessibilityRole &result) {
+  react_native_expect(value.hasType<std::string>());
   if (value.hasType<std::string>()) {
     auto string = (std::string)value;
     if (string == "none") {
       result = AccessibilityRole::None;
-    } else if (string == "button") {
+    } else if (string == "button" || string == "togglebutton") {
       result = AccessibilityRole::Button;
     } else if (string == "link") {
       result = AccessibilityRole::Link;
@@ -607,6 +763,8 @@ inline void fromRawValue(const RawValue &value, AccessibilityRole &result) {
       result = AccessibilityRole::Switch;
     } else if (string == "tab") {
       result = AccessibilityRole::Tab;
+    } else if (string == "tabbar") {
+      result = AccessibilityRole::TabBar;
     } else if (string == "tablist") {
       result = AccessibilityRole::Tablist;
     } else if (string == "timer") {
@@ -615,7 +773,7 @@ inline void fromRawValue(const RawValue &value, AccessibilityRole &result) {
       result = AccessibilityRole::Toolbar;
     } else {
       LOG(ERROR) << "Unsupported AccessibilityRole value: " << string;
-      react_native_assert(false);
+      react_native_expect(false);
       // sane default for prod
       result = AccessibilityRole::None;
     }
@@ -623,60 +781,117 @@ inline void fromRawValue(const RawValue &value, AccessibilityRole &result) {
   }
 
   LOG(ERROR) << "Unsupported AccessibilityRole type";
-  react_native_assert(false);
+  react_native_expect(false);
   // sane default for prod
   result = AccessibilityRole::None;
 }
 
+inline std::string toString(const HyphenationFrequency &hyphenationFrequency) {
+  switch (hyphenationFrequency) {
+    case HyphenationFrequency::None:
+      return "none";
+    case HyphenationFrequency::Normal:
+      return "normal";
+    case HyphenationFrequency::Full:
+      return "full";
+  }
+
+  LOG(ERROR) << "Unsupported HyphenationFrequency value";
+  react_native_expect(false);
+  return "none";
+}
+
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    HyphenationFrequency &result) {
+  react_native_expect(value.hasType<std::string>());
+  if (value.hasType<std::string>()) {
+    auto string = (std::string)value;
+    if (string == "none") {
+      result = HyphenationFrequency::None;
+    } else if (string == "normal") {
+      result = HyphenationFrequency::Normal;
+    } else if (string == "full") {
+      result = HyphenationFrequency::Full;
+    } else {
+      // sane default
+      LOG(ERROR) << "Unsupported HyphenationFrequency value: " << string;
+      react_native_expect(false);
+      result = HyphenationFrequency::None;
+    }
+    return;
+  }
+
+  LOG(ERROR) << "Unsupported HyphenationFrequency type";
+  react_native_expect(false);
+  result = HyphenationFrequency::None;
+}
+
 inline ParagraphAttributes convertRawProp(
+    const PropsParserContext &context,
     RawProps const &rawProps,
     ParagraphAttributes const &sourceParagraphAttributes,
     ParagraphAttributes const &defaultParagraphAttributes) {
   auto paragraphAttributes = ParagraphAttributes{};
 
   paragraphAttributes.maximumNumberOfLines = convertRawProp(
+      context,
       rawProps,
       "numberOfLines",
       sourceParagraphAttributes.maximumNumberOfLines,
       defaultParagraphAttributes.maximumNumberOfLines);
   paragraphAttributes.ellipsizeMode = convertRawProp(
+      context,
       rawProps,
       "ellipsizeMode",
       sourceParagraphAttributes.ellipsizeMode,
       defaultParagraphAttributes.ellipsizeMode);
   paragraphAttributes.textBreakStrategy = convertRawProp(
+      context,
       rawProps,
       "textBreakStrategy",
       sourceParagraphAttributes.textBreakStrategy,
       defaultParagraphAttributes.textBreakStrategy);
   paragraphAttributes.adjustsFontSizeToFit = convertRawProp(
+      context,
       rawProps,
       "adjustsFontSizeToFit",
       sourceParagraphAttributes.adjustsFontSizeToFit,
       defaultParagraphAttributes.adjustsFontSizeToFit);
   paragraphAttributes.minimumFontSize = convertRawProp(
+      context,
       rawProps,
       "minimumFontSize",
       sourceParagraphAttributes.minimumFontSize,
       defaultParagraphAttributes.minimumFontSize);
   paragraphAttributes.maximumFontSize = convertRawProp(
+      context,
       rawProps,
       "maximumFontSize",
       sourceParagraphAttributes.maximumFontSize,
       defaultParagraphAttributes.maximumFontSize);
   paragraphAttributes.includeFontPadding = convertRawProp(
+      context,
       rawProps,
       "includeFontPadding",
       sourceParagraphAttributes.includeFontPadding,
       defaultParagraphAttributes.includeFontPadding);
+  paragraphAttributes.android_hyphenationFrequency = convertRawProp(
+      context,
+      rawProps,
+      "android_hyphenationFrequency",
+      sourceParagraphAttributes.android_hyphenationFrequency,
+      defaultParagraphAttributes.android_hyphenationFrequency);
 
   return paragraphAttributes;
 }
 
 inline void fromRawValue(
+    const PropsParserContext &context,
     RawValue const &value,
     AttributedString::Range &result) {
-  auto map = (better::map<std::string, int>)value;
+  auto map = (butter::map<std::string, int>)value;
 
   auto start = map.find("start");
   if (start != map.end()) {
@@ -703,6 +918,9 @@ inline folly::dynamic toDynamic(
   values("textBreakStrategy", toString(paragraphAttributes.textBreakStrategy));
   values("adjustsFontSizeToFit", paragraphAttributes.adjustsFontSizeToFit);
   values("includeFontPadding", paragraphAttributes.includeFontPadding);
+  values(
+      "android_hyphenationFrequency",
+      toString(paragraphAttributes.android_hyphenationFrequency));
 
   return values;
 }
@@ -732,11 +950,11 @@ inline folly::dynamic toDynamic(const TextAttributes &textAttributes) {
   auto _textAttributes = folly::dynamic::object();
   if (textAttributes.foregroundColor) {
     _textAttributes(
-        "foregroundColor", toDynamic(textAttributes.foregroundColor));
+        "foregroundColor", toAndroidRepr(textAttributes.foregroundColor));
   }
   if (textAttributes.backgroundColor) {
     _textAttributes(
-        "backgroundColor", toDynamic(textAttributes.backgroundColor));
+        "backgroundColor", toAndroidRepr(textAttributes.backgroundColor));
   }
   if (!std::isnan(textAttributes.opacity)) {
     _textAttributes("opacity", textAttributes.opacity);
@@ -765,6 +983,9 @@ inline folly::dynamic toDynamic(const TextAttributes &textAttributes) {
   if (!std::isnan(textAttributes.letterSpacing)) {
     _textAttributes("letterSpacing", textAttributes.letterSpacing);
   }
+  if (textAttributes.textTransform.has_value()) {
+    _textAttributes("textTransform", toString(*textAttributes.textTransform));
+  }
   if (!std::isnan(textAttributes.lineHeight)) {
     _textAttributes("lineHeight", textAttributes.lineHeight);
   }
@@ -775,24 +996,23 @@ inline folly::dynamic toDynamic(const TextAttributes &textAttributes) {
     _textAttributes(
         "baseWritingDirection", toString(*textAttributes.baseWritingDirection));
   }
+  if (textAttributes.lineBreakStrategy.has_value()) {
+    _textAttributes(
+        "lineBreakStrategyIOS", toString(*textAttributes.lineBreakStrategy));
+  }
   // Decoration
   if (textAttributes.textDecorationColor) {
     _textAttributes(
-        "textDecorationColor", toDynamic(textAttributes.textDecorationColor));
+        "textDecorationColor",
+        toAndroidRepr(textAttributes.textDecorationColor));
   }
   if (textAttributes.textDecorationLineType.has_value()) {
     _textAttributes(
         "textDecorationLine", toString(*textAttributes.textDecorationLineType));
   }
-  if (textAttributes.textDecorationLineStyle.has_value()) {
+  if (textAttributes.textDecorationStyle.has_value()) {
     _textAttributes(
-        "textDecorationLineStyle",
-        toString(*textAttributes.textDecorationLineStyle));
-  }
-  if (textAttributes.textDecorationLinePattern.has_value()) {
-    _textAttributes(
-        "textDecorationLinePattern",
-        toString(*textAttributes.textDecorationLinePattern));
+        "textDecorationStyle", toString(*textAttributes.textDecorationStyle));
   }
   // Shadow
   // textShadowOffset = textAttributes.textShadowOffset.has_value() ?
@@ -802,7 +1022,7 @@ inline folly::dynamic toDynamic(const TextAttributes &textAttributes) {
   }
   if (textAttributes.textShadowColor) {
     _textAttributes(
-        "textShadowColor", toDynamic(textAttributes.textShadowColor));
+        "textShadowColor", toAndroidRepr(textAttributes.textShadowColor));
   }
   // Special
   if (textAttributes.isHighlighted.has_value()) {
@@ -853,50 +1073,51 @@ inline folly::dynamic toDynamic(AttributedString::Range const &range) {
 }
 
 // constants for AttributedString serialization
-constexpr static Key AS_KEY_HASH = 0;
-constexpr static Key AS_KEY_STRING = 1;
-constexpr static Key AS_KEY_FRAGMENTS = 2;
-constexpr static Key AS_KEY_CACHE_ID = 3;
+constexpr static MapBuffer::Key AS_KEY_HASH = 0;
+constexpr static MapBuffer::Key AS_KEY_STRING = 1;
+constexpr static MapBuffer::Key AS_KEY_FRAGMENTS = 2;
+constexpr static MapBuffer::Key AS_KEY_CACHE_ID = 3;
 
 // constants for Fragment serialization
-constexpr static Key FR_KEY_STRING = 0;
-constexpr static Key FR_KEY_REACT_TAG = 1;
-constexpr static Key FR_KEY_IS_ATTACHMENT = 2;
-constexpr static Key FR_KEY_WIDTH = 3;
-constexpr static Key FR_KEY_HEIGHT = 4;
-constexpr static Key FR_KEY_TEXT_ATTRIBUTES = 5;
+constexpr static MapBuffer::Key FR_KEY_STRING = 0;
+constexpr static MapBuffer::Key FR_KEY_REACT_TAG = 1;
+constexpr static MapBuffer::Key FR_KEY_IS_ATTACHMENT = 2;
+constexpr static MapBuffer::Key FR_KEY_WIDTH = 3;
+constexpr static MapBuffer::Key FR_KEY_HEIGHT = 4;
+constexpr static MapBuffer::Key FR_KEY_TEXT_ATTRIBUTES = 5;
 
 // constants for Text Attributes serialization
-constexpr static Key TA_KEY_FOREGROUND_COLOR = 0;
-constexpr static Key TA_KEY_BACKGROUND_COLOR = 1;
-constexpr static Key TA_KEY_OPACITY = 2;
-constexpr static Key TA_KEY_FONT_FAMILY = 3;
-constexpr static Key TA_KEY_FONT_SIZE = 4;
-constexpr static Key TA_KEY_FONT_SIZE_MULTIPLIER = 5;
-constexpr static Key TA_KEY_FONT_WEIGHT = 6;
-constexpr static Key TA_KEY_FONT_STYLE = 7;
-constexpr static Key TA_KEY_FONT_VARIANT = 8;
-constexpr static Key TA_KEY_ALLOW_FONT_SCALING = 9;
-constexpr static Key TA_KEY_LETTER_SPACING = 10;
-constexpr static Key TA_KEY_LINE_HEIGHT = 11;
-constexpr static Key TA_KEY_ALIGNMENT = 12;
-constexpr static Key TA_KEY_BEST_WRITING_DIRECTION = 13;
-constexpr static Key TA_KEY_TEXT_DECORATION_COLOR = 14;
-constexpr static Key TA_KEY_TEXT_DECORATION_LINE = 15;
-constexpr static Key TA_KEY_TEXT_DECORATION_LINE_STYLE = 16;
-constexpr static Key TA_KEY_TEXT_DECORATION_LINE_PATTERN = 17;
-constexpr static Key TA_KEY_TEXT_SHADOW_RAIDUS = 18;
-constexpr static Key TA_KEY_TEXT_SHADOW_COLOR = 19;
-constexpr static Key TA_KEY_IS_HIGHLIGHTED = 20;
-constexpr static Key TA_KEY_LAYOUT_DIRECTION = 21;
-constexpr static Key TA_KEY_ACCESSIBILITY_ROLE = 22;
+constexpr static MapBuffer::Key TA_KEY_FOREGROUND_COLOR = 0;
+constexpr static MapBuffer::Key TA_KEY_BACKGROUND_COLOR = 1;
+constexpr static MapBuffer::Key TA_KEY_OPACITY = 2;
+constexpr static MapBuffer::Key TA_KEY_FONT_FAMILY = 3;
+constexpr static MapBuffer::Key TA_KEY_FONT_SIZE = 4;
+constexpr static MapBuffer::Key TA_KEY_FONT_SIZE_MULTIPLIER = 5;
+constexpr static MapBuffer::Key TA_KEY_FONT_WEIGHT = 6;
+constexpr static MapBuffer::Key TA_KEY_FONT_STYLE = 7;
+constexpr static MapBuffer::Key TA_KEY_FONT_VARIANT = 8;
+constexpr static MapBuffer::Key TA_KEY_ALLOW_FONT_SCALING = 9;
+constexpr static MapBuffer::Key TA_KEY_LETTER_SPACING = 10;
+constexpr static MapBuffer::Key TA_KEY_LINE_HEIGHT = 11;
+constexpr static MapBuffer::Key TA_KEY_ALIGNMENT = 12;
+constexpr static MapBuffer::Key TA_KEY_BEST_WRITING_DIRECTION = 13;
+constexpr static MapBuffer::Key TA_KEY_TEXT_DECORATION_COLOR = 14;
+constexpr static MapBuffer::Key TA_KEY_TEXT_DECORATION_LINE = 15;
+constexpr static MapBuffer::Key TA_KEY_TEXT_DECORATION_STYLE = 16;
+constexpr static MapBuffer::Key TA_KEY_TEXT_SHADOW_RADIUS = 18;
+constexpr static MapBuffer::Key TA_KEY_TEXT_SHADOW_COLOR = 19;
+constexpr static MapBuffer::Key TA_KEY_IS_HIGHLIGHTED = 20;
+constexpr static MapBuffer::Key TA_KEY_LAYOUT_DIRECTION = 21;
+constexpr static MapBuffer::Key TA_KEY_ACCESSIBILITY_ROLE = 22;
+constexpr static MapBuffer::Key TA_KEY_LINE_BREAK_STRATEGY = 23;
 
 // constants for ParagraphAttributes serialization
-constexpr static Key PA_KEY_MAX_NUMBER_OF_LINES = 0;
-constexpr static Key PA_KEY_ELLIPSIZE_MODE = 1;
-constexpr static Key PA_KEY_TEXT_BREAK_STRATEGY = 2;
-constexpr static Key PA_KEY_ADJUST_FONT_SIZE_TO_FIT = 3;
-constexpr static Key PA_KEY_INCLUDE_FONT_PADDING = 4;
+constexpr static MapBuffer::Key PA_KEY_MAX_NUMBER_OF_LINES = 0;
+constexpr static MapBuffer::Key PA_KEY_ELLIPSIZE_MODE = 1;
+constexpr static MapBuffer::Key PA_KEY_TEXT_BREAK_STRATEGY = 2;
+constexpr static MapBuffer::Key PA_KEY_ADJUST_FONT_SIZE_TO_FIT = 3;
+constexpr static MapBuffer::Key PA_KEY_INCLUDE_FONT_PADDING = 4;
+constexpr static MapBuffer::Key PA_KEY_HYPHENATION_FREQUENCY = 5;
 
 inline MapBuffer toMapBuffer(const ParagraphAttributes &paragraphAttributes) {
   auto builder = MapBufferBuilder();
@@ -911,6 +1132,9 @@ inline MapBuffer toMapBuffer(const ParagraphAttributes &paragraphAttributes) {
       PA_KEY_ADJUST_FONT_SIZE_TO_FIT, paragraphAttributes.adjustsFontSizeToFit);
   builder.putBool(
       PA_KEY_INCLUDE_FONT_PADDING, paragraphAttributes.includeFontPadding);
+  builder.putString(
+      PA_KEY_HYPHENATION_FREQUENCY,
+      toString(paragraphAttributes.android_hyphenationFrequency));
 
   return builder.build();
 }
@@ -941,11 +1165,11 @@ inline MapBuffer toMapBuffer(const TextAttributes &textAttributes) {
   auto builder = MapBufferBuilder();
   if (textAttributes.foregroundColor) {
     builder.putInt(
-        TA_KEY_FOREGROUND_COLOR, toMapBuffer(textAttributes.foregroundColor));
+        TA_KEY_FOREGROUND_COLOR, toAndroidRepr(textAttributes.foregroundColor));
   }
   if (textAttributes.backgroundColor) {
     builder.putInt(
-        TA_KEY_BACKGROUND_COLOR, toMapBuffer(textAttributes.backgroundColor));
+        TA_KEY_BACKGROUND_COLOR, toAndroidRepr(textAttributes.backgroundColor));
   }
   if (!std::isnan(textAttributes.opacity)) {
     builder.putDouble(TA_KEY_OPACITY, textAttributes.opacity);
@@ -988,35 +1212,37 @@ inline MapBuffer toMapBuffer(const TextAttributes &textAttributes) {
         TA_KEY_BEST_WRITING_DIRECTION,
         toString(*textAttributes.baseWritingDirection));
   }
+  if (textAttributes.lineBreakStrategy.has_value()) {
+    builder.putString(
+        TA_KEY_LINE_BREAK_STRATEGY,
+        toString(*textAttributes.lineBreakStrategy));
+  }
   // Decoration
   if (textAttributes.textDecorationColor) {
     builder.putInt(
         TA_KEY_TEXT_DECORATION_COLOR,
-        toMapBuffer(textAttributes.textDecorationColor));
+        toAndroidRepr(textAttributes.textDecorationColor));
   }
   if (textAttributes.textDecorationLineType.has_value()) {
     builder.putString(
         TA_KEY_TEXT_DECORATION_LINE,
         toString(*textAttributes.textDecorationLineType));
   }
-  if (textAttributes.textDecorationLineStyle.has_value()) {
+  if (textAttributes.textDecorationStyle.has_value()) {
     builder.putString(
-        TA_KEY_TEXT_DECORATION_LINE_STYLE,
-        toString(*textAttributes.textDecorationLineStyle));
+        TA_KEY_TEXT_DECORATION_STYLE,
+        toString(*textAttributes.textDecorationStyle));
   }
-  if (textAttributes.textDecorationLinePattern.has_value()) {
-    builder.putString(
-        TA_KEY_TEXT_DECORATION_LINE_PATTERN,
-        toString(*textAttributes.textDecorationLinePattern));
-  }
+
   // Shadow
   if (!std::isnan(textAttributes.textShadowRadius)) {
     builder.putDouble(
-        TA_KEY_TEXT_SHADOW_RAIDUS, textAttributes.textShadowRadius);
+        TA_KEY_TEXT_SHADOW_RADIUS, textAttributes.textShadowRadius);
   }
   if (textAttributes.textShadowColor) {
     builder.putInt(
-        TA_KEY_TEXT_SHADOW_COLOR, toMapBuffer(textAttributes.textShadowColor));
+        TA_KEY_TEXT_SHADOW_COLOR,
+        toAndroidRepr(textAttributes.textShadowColor));
   }
   // Special
   if (textAttributes.isHighlighted.has_value()) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,67 +7,56 @@
 
 #pragma once
 
-#include <better/map.h>
-#include <folly/dynamic.h>
+#include <butter/map.h>
 #include <glog/logging.h>
-#include <react/debug/react_native_assert.h>
+#include <react/debug/react_native_expect.h>
+#include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/core/RawProps.h>
 #include <react/renderer/graphics/Color.h>
-#include <react/renderer/graphics/Geometry.h>
+#include <react/renderer/graphics/PlatformColorParser.h>
+#include <react/renderer/graphics/Point.h>
+#include <react/renderer/graphics/Rect.h>
+#include <react/renderer/graphics/RectangleCorners.h>
+#include <react/renderer/graphics/RectangleEdges.h>
+#include <react/renderer/graphics/Size.h>
 
 namespace facebook {
 namespace react {
 
 #pragma mark - Color
 
-inline void fromRawValue(const RawValue &value, SharedColor &result) {
-  float red = 0;
-  float green = 0;
-  float blue = 0;
-  float alpha = 0;
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    SharedColor &result) {
+  ColorComponents colorComponents = {0, 0, 0, 0};
 
   if (value.hasType<int>()) {
     auto argb = (int64_t)value;
     auto ratio = 255.f;
-    alpha = ((argb >> 24) & 0xFF) / ratio;
-    red = ((argb >> 16) & 0xFF) / ratio;
-    green = ((argb >> 8) & 0xFF) / ratio;
-    blue = (argb & 0xFF) / ratio;
+    colorComponents.alpha = ((argb >> 24) & 0xFF) / ratio;
+    colorComponents.red = ((argb >> 16) & 0xFF) / ratio;
+    colorComponents.green = ((argb >> 8) & 0xFF) / ratio;
+    colorComponents.blue = (argb & 0xFF) / ratio;
   } else if (value.hasType<std::vector<float>>()) {
     auto items = (std::vector<float>)value;
     auto length = items.size();
-    react_native_assert(length == 3 || length == 4);
-    red = items.at(0);
-    green = items.at(1);
-    blue = items.at(2);
-    alpha = length == 4 ? items.at(3) : 1.0f;
+    react_native_expect(length == 3 || length == 4);
+    colorComponents.red = items.at(0);
+    colorComponents.green = items.at(1);
+    colorComponents.blue = items.at(2);
+    colorComponents.alpha = length == 4 ? items.at(3) : 1.0f;
+  } else {
+    colorComponents = parsePlatformColor(context, value);
   }
 
-  result = colorFromComponents({red, green, blue, alpha});
+  result = colorFromComponents(colorComponents);
 }
 
 #ifdef ANDROID
-
-inline folly::dynamic toDynamic(const SharedColor &color) {
-  ColorComponents components = colorComponentsFromColor(color);
-  auto ratio = 255.f;
-  return (
-      ((int)round(components.alpha * ratio) & 0xff) << 24 |
-      ((int)round(components.red * ratio) & 0xff) << 16 |
-      ((int)round(components.green * ratio) & 0xff) << 8 |
-      ((int)round(components.blue * ratio) & 0xff));
+inline int toAndroidRepr(const SharedColor &color) {
+  return *color;
 }
-
-inline int toMapBuffer(const SharedColor &color) {
-  ColorComponents components = colorComponentsFromColor(color);
-  auto ratio = 255.f;
-  return (
-      ((int)round(components.alpha * ratio) & 0xff) << 24 |
-      ((int)round(components.red * ratio) & 0xff) << 16 |
-      ((int)round(components.green * ratio) & 0xff) << 8 |
-      ((int)round(components.blue * ratio) & 0xff));
-}
-
 #endif
 
 inline std::string toString(const SharedColor &value) {
@@ -81,9 +70,12 @@ inline std::string toString(const SharedColor &value) {
 
 #pragma mark - Geometry
 
-inline void fromRawValue(const RawValue &value, Point &result) {
-  if (value.hasType<better::map<std::string, Float>>()) {
-    auto map = (better::map<std::string, Float>)value;
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    Point &result) {
+  if (value.hasType<butter::map<std::string, Float>>()) {
+    auto map = (butter::map<std::string, Float>)value;
     for (const auto &pair : map) {
       if (pair.first == "x") {
         result.x = pair.second;
@@ -94,10 +86,10 @@ inline void fromRawValue(const RawValue &value, Point &result) {
     return;
   }
 
-  react_native_assert(value.hasType<std::vector<Float>>());
+  react_native_expect(value.hasType<std::vector<Float>>());
   if (value.hasType<std::vector<Float>>()) {
     auto array = (std::vector<Float>)value;
-    react_native_assert(array.size() == 2);
+    react_native_expect(array.size() == 2);
     if (array.size() >= 2) {
       result = {array.at(0), array.at(1)};
     } else {
@@ -109,9 +101,12 @@ inline void fromRawValue(const RawValue &value, Point &result) {
   }
 }
 
-inline void fromRawValue(const RawValue &value, Size &result) {
-  if (value.hasType<better::map<std::string, Float>>()) {
-    auto map = (better::map<std::string, Float>)value;
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    Size &result) {
+  if (value.hasType<butter::map<std::string, Float>>()) {
+    auto map = (butter::map<std::string, Float>)value;
     for (const auto &pair : map) {
       if (pair.first == "width") {
         result.width = pair.second;
@@ -119,16 +114,16 @@ inline void fromRawValue(const RawValue &value, Size &result) {
         result.height = pair.second;
       } else {
         LOG(ERROR) << "Unsupported Size map key: " << pair.first;
-        react_native_assert(false);
+        react_native_expect(false);
       }
     }
     return;
   }
 
-  react_native_assert(value.hasType<std::vector<Float>>());
+  react_native_expect(value.hasType<std::vector<Float>>());
   if (value.hasType<std::vector<Float>>()) {
     auto array = (std::vector<Float>)value;
-    react_native_assert(array.size() == 2);
+    react_native_expect(array.size() == 2);
     if (array.size() >= 2) {
       result = {array.at(0), array.at(1)};
     } else {
@@ -140,14 +135,18 @@ inline void fromRawValue(const RawValue &value, Size &result) {
   }
 }
 
-inline void fromRawValue(const RawValue &value, EdgeInsets &result) {
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    EdgeInsets &result) {
   if (value.hasType<Float>()) {
     auto number = (Float)value;
     result = {number, number, number, number};
+    return;
   }
 
-  if (value.hasType<better::map<std::string, Float>>()) {
-    auto map = (better::map<std::string, Float>)value;
+  if (value.hasType<butter::map<std::string, Float>>()) {
+    auto map = (butter::map<std::string, Float>)value;
     for (const auto &pair : map) {
       if (pair.first == "top") {
         result.top = pair.second;
@@ -159,16 +158,16 @@ inline void fromRawValue(const RawValue &value, EdgeInsets &result) {
         result.right = pair.second;
       } else {
         LOG(ERROR) << "Unsupported EdgeInsets map key: " << pair.first;
-        react_native_assert(false);
+        react_native_expect(false);
       }
     }
     return;
   }
 
-  react_native_assert(value.hasType<std::vector<Float>>());
+  react_native_expect(value.hasType<std::vector<Float>>());
   if (value.hasType<std::vector<Float>>()) {
     auto array = (std::vector<Float>)value;
-    react_native_assert(array.size() == 4);
+    react_native_expect(array.size() == 4);
     if (array.size() >= 4) {
       result = {array.at(0), array.at(1), array.at(2), array.at(3)};
     } else {
@@ -180,15 +179,18 @@ inline void fromRawValue(const RawValue &value, EdgeInsets &result) {
   }
 }
 
-inline void fromRawValue(const RawValue &value, CornerInsets &result) {
+inline void fromRawValue(
+    const PropsParserContext &context,
+    const RawValue &value,
+    CornerInsets &result) {
   if (value.hasType<Float>()) {
     auto number = (Float)value;
     result = {number, number, number, number};
     return;
   }
 
-  if (value.hasType<better::map<std::string, Float>>()) {
-    auto map = (better::map<std::string, Float>)value;
+  if (value.hasType<butter::map<std::string, Float>>()) {
+    auto map = (butter::map<std::string, Float>)value;
     for (const auto &pair : map) {
       if (pair.first == "topLeft") {
         result.topLeft = pair.second;
@@ -200,16 +202,16 @@ inline void fromRawValue(const RawValue &value, CornerInsets &result) {
         result.bottomRight = pair.second;
       } else {
         LOG(ERROR) << "Unsupported CornerInsets map key: " << pair.first;
-        react_native_assert(false);
+        react_native_expect(false);
       }
     }
     return;
   }
 
-  react_native_assert(value.hasType<std::vector<Float>>());
+  react_native_expect(value.hasType<std::vector<Float>>());
   if (value.hasType<std::vector<Float>>()) {
     auto array = (std::vector<Float>)value;
-    react_native_assert(array.size() == 4);
+    react_native_expect(array.size() == 4);
     if (array.size() >= 4) {
       result = {array.at(0), array.at(1), array.at(2), array.at(3)};
     } else {

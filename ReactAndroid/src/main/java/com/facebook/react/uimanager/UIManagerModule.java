@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -17,7 +17,6 @@ import android.content.res.Configuration;
 import android.view.View;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.collection.ArrayMap;
 import com.facebook.common.logging.FLog;
 import com.facebook.debug.holder.PrinterHolder;
 import com.facebook.debug.tags.ReactDebugOverlayTags;
@@ -40,7 +39,6 @@ import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.common.MapBuilder;
 import com.facebook.react.common.ReactConstants;
-import com.facebook.react.config.ReactFeatureFlags;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.uimanager.common.ViewUtil;
 import com.facebook.react.uimanager.debug.NotThreadSafeViewHierarchyUpdateDebugListener;
@@ -50,7 +48,6 @@ import com.facebook.react.uimanager.events.RCTEventEmitter;
 import com.facebook.systrace.Systrace;
 import com.facebook.systrace.SystraceMessage;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -110,40 +107,12 @@ public class UIManagerModule extends ReactContextBaseJavaModule
   private final List<UIManagerModuleListener> mListeners = new ArrayList<>();
   private final CopyOnWriteArrayList<UIManagerListener> mUIManagerListeners =
       new CopyOnWriteArrayList<>();
-  private @Nullable Map<String, WritableMap> mViewManagerConstantsCache;
-  private volatile int mViewManagerConstantsCacheSize;
 
   private int mBatchId = 0;
 
-  @SuppressWarnings("deprecated")
   public UIManagerModule(
       ReactApplicationContext reactContext,
       ViewManagerResolver viewManagerResolver,
-      int minTimeLeftInFrameForNonBatchedOperationMs) {
-    this(
-        reactContext,
-        viewManagerResolver,
-        new UIImplementationProvider(),
-        minTimeLeftInFrameForNonBatchedOperationMs);
-  }
-
-  @SuppressWarnings("deprecated")
-  public UIManagerModule(
-      ReactApplicationContext reactContext,
-      List<ViewManager> viewManagersList,
-      int minTimeLeftInFrameForNonBatchedOperationMs) {
-    this(
-        reactContext,
-        viewManagersList,
-        new UIImplementationProvider(),
-        minTimeLeftInFrameForNonBatchedOperationMs);
-  }
-
-  @Deprecated
-  public UIManagerModule(
-      ReactApplicationContext reactContext,
-      ViewManagerResolver viewManagerResolver,
-      UIImplementationProvider uiImplementationProvider,
       int minTimeLeftInFrameForNonBatchedOperationMs) {
     super(reactContext);
     DisplayMetricsHolder.initDisplayMetricsIfNotInitialized(reactContext);
@@ -152,7 +121,7 @@ public class UIManagerModule extends ReactContextBaseJavaModule
     mCustomDirectEvents = UIManagerModuleConstants.getDirectEventTypeConstants();
     mViewManagerRegistry = new ViewManagerRegistry(viewManagerResolver);
     mUIImplementation =
-        uiImplementationProvider.createUIImplementation(
+        new UIImplementation(
             reactContext,
             mViewManagerRegistry,
             mEventDispatcher,
@@ -161,11 +130,9 @@ public class UIManagerModule extends ReactContextBaseJavaModule
     reactContext.addLifecycleEventListener(this);
   }
 
-  @Deprecated
   public UIManagerModule(
       ReactApplicationContext reactContext,
       List<ViewManager> viewManagersList,
-      UIImplementationProvider uiImplementationProvider,
       int minTimeLeftInFrameForNonBatchedOperationMs) {
     super(reactContext);
     DisplayMetricsHolder.initDisplayMetricsIfNotInitialized(reactContext);
@@ -174,7 +141,7 @@ public class UIManagerModule extends ReactContextBaseJavaModule
     mModuleConstants = createConstants(viewManagersList, null, mCustomDirectEvents);
     mViewManagerRegistry = new ViewManagerRegistry(viewManagersList);
     mUIImplementation =
-        uiImplementationProvider.createUIImplementation(
+        new UIImplementation(
             reactContext,
             mViewManagerRegistry,
             mEventDispatcher,
@@ -207,6 +174,7 @@ public class UIManagerModule extends ReactContextBaseJavaModule
   @Override
   public void initialize() {
     getReactApplicationContext().registerComponentCallbacks(mMemoryTrimCallback);
+    getReactApplicationContext().registerComponentCallbacks(mViewManagerRegistry);
     mEventDispatcher.registerEventEmitter(
         DEFAULT, getReactApplicationContext().getJSModule(RCTEventEmitter.class));
   }
@@ -233,10 +201,8 @@ public class UIManagerModule extends ReactContextBaseJavaModule
     mUIImplementation.onCatalystInstanceDestroyed();
 
     ReactApplicationContext reactApplicationContext = getReactApplicationContext();
-    if (ReactFeatureFlags.enableReactContextCleanupFix) {
-      reactApplicationContext.removeLifecycleEventListener(this);
-    }
     reactApplicationContext.unregisterComponentCallbacks(mMemoryTrimCallback);
+    reactApplicationContext.unregisterComponentCallbacks(mViewManagerRegistry);
     YogaNodePool.get().clear();
     ViewManagerPropertyUpdater.clear();
   }
@@ -280,60 +246,8 @@ public class UIManagerModule extends ReactContextBaseJavaModule
     }
   }
 
-  /**
-   * Helper method to pre-compute the constants for a view manager. This method ensures that we
-   * don't block for getting the constants for view managers during TTI
-   *
-   * @deprecated this method will be removed in the future
-   * @param viewManagerNames {@link List<String>} names of ViewManagers
-   */
-  @Deprecated
-  @Override
-  public void preInitializeViewManagers(List<String> viewManagerNames) {
-    if (ReactFeatureFlags.enableExperimentalStaticViewConfigs) {
-      for (String viewManagerName : viewManagerNames) {
-        mUIImplementation.resolveViewManager(viewManagerName);
-      }
-      // When Static view configs are enabled it is not necessary to pre-compute the constants for
-      // viewManagers, although the pre-initialization of viewManager objects is still necessary
-      // for performance reasons.
-      return;
-    }
-
-    Map<String, WritableMap> constantsMap = new ArrayMap<>();
-    for (String viewManagerName : viewManagerNames) {
-      WritableMap constants = computeConstantsForViewManager(viewManagerName);
-      if (constants != null) {
-        constantsMap.put(viewManagerName, constants);
-      }
-    }
-
-    // To ensure that this is thread safe, we return an unmodifiableMap
-    // We use mViewManagerConstantsCacheSize to count the times we access the contents of the map
-    // Once we have accessed all the values, we free this cache
-    // Assumption is that JS gets the constants only once for each viewManager.
-    // Using this mechanism prevents expensive synchronized blocks, due to the nature of how this is
-    // accessed - write one, read multiple times, and then throw the data away.
-    mViewManagerConstantsCacheSize = viewManagerNames.size();
-    mViewManagerConstantsCache = Collections.unmodifiableMap(constantsMap);
-  }
-
   @ReactMethod(isBlockingSynchronousMethod = true)
   public @Nullable WritableMap getConstantsForViewManager(@Nullable String viewManagerName) {
-    if (mViewManagerConstantsCache != null
-        && mViewManagerConstantsCache.containsKey(viewManagerName)) {
-      WritableMap constants = mViewManagerConstantsCache.get(viewManagerName);
-      if (--mViewManagerConstantsCacheSize <= 0) {
-        // Looks like we have read all the values from the cache, so we may as well free this cache
-        mViewManagerConstantsCache = null;
-      }
-      return constants;
-    } else {
-      return computeConstantsForViewManager(viewManagerName);
-    }
-  }
-
-  private @Nullable WritableMap computeConstantsForViewManager(@Nullable String viewManagerName) {
     ViewManager targetView =
         viewManagerName != null ? mUIImplementation.resolveViewManager(viewManagerName) : null;
     if (targetView == null) {
@@ -931,7 +845,7 @@ public class UIManagerModule extends ReactContextBaseJavaModule
   }
 
   /** Listener that drops the CSSNode pool on low memory when the app is backgrounded. */
-  private class MemoryTrimCallback implements ComponentCallbacks2 {
+  private static class MemoryTrimCallback implements ComponentCallbacks2 {
 
     @Override
     public void onTrimMemory(int level) {
@@ -947,6 +861,7 @@ public class UIManagerModule extends ReactContextBaseJavaModule
     public void onLowMemory() {}
   }
 
+  @Override
   public View resolveView(int tag) {
     UiThreadUtil.assertOnUiThread();
     return mUIImplementation

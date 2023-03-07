@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,11 +12,13 @@ import android.view.View;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.drawerlayout.widget.DrawerLayout;
+import com.facebook.common.logging.FLog;
 import com.facebook.react.bridge.Dynamic;
 import com.facebook.react.bridge.JSApplicationIllegalArgumentException;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableType;
 import com.facebook.react.common.MapBuilder;
+import com.facebook.react.common.ReactConstants;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.uimanager.PixelUtil;
 import com.facebook.react.uimanager.ThemedReactContext;
@@ -31,6 +33,7 @@ import com.facebook.react.views.drawer.events.DrawerClosedEvent;
 import com.facebook.react.views.drawer.events.DrawerOpenedEvent;
 import com.facebook.react.views.drawer.events.DrawerSlideEvent;
 import com.facebook.react.views.drawer.events.DrawerStateChangedEvent;
+import java.util.HashMap;
 import java.util.Map;
 
 /** View Manager for {@link ReactDrawerLayout} components. */
@@ -89,13 +92,14 @@ public class ReactDrawerLayoutManager extends ViewGroupManager<ReactDrawerLayout
       if (Gravity.START == drawerPositionNum || Gravity.END == drawerPositionNum) {
         view.setDrawerPosition(drawerPositionNum);
       } else {
-        throw new JSApplicationIllegalArgumentException(
-            "Unknown drawerPosition " + drawerPositionNum);
+        FLog.w(ReactConstants.TAG, "Unknown drawerPosition " + drawerPositionNum);
+        view.setDrawerPosition(Gravity.START);
       }
     } else if (drawerPosition.getType() == ReadableType.String) {
       setDrawerPositionInternal(view, drawerPosition.asString());
     } else {
-      throw new JSApplicationIllegalArgumentException("drawerPosition must be a string or int");
+      FLog.w(ReactConstants.TAG, "drawerPosition must be a string or int");
+      view.setDrawerPosition(Gravity.START);
     }
   }
 
@@ -105,8 +109,10 @@ public class ReactDrawerLayoutManager extends ViewGroupManager<ReactDrawerLayout
     } else if (drawerPosition.equals("right")) {
       view.setDrawerPosition(Gravity.END);
     } else {
-      throw new JSApplicationIllegalArgumentException(
+      FLog.w(
+          ReactConstants.TAG,
           "drawerPosition must be 'left' or 'right', received" + drawerPosition);
+      view.setDrawerPosition(Gravity.START);
     }
   }
 
@@ -138,7 +144,8 @@ public class ReactDrawerLayoutManager extends ViewGroupManager<ReactDrawerLayout
     } else if ("locked-open".equals(drawerLockMode)) {
       view.setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_OPEN);
     } else {
-      throw new JSApplicationIllegalArgumentException("Unknown drawerLockMode " + drawerLockMode);
+      FLog.w(ReactConstants.TAG, "Unknown drawerLockMode " + drawerLockMode);
+      view.setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED);
     }
   }
 
@@ -153,12 +160,15 @@ public class ReactDrawerLayoutManager extends ViewGroupManager<ReactDrawerLayout
   }
 
   @Override
+  @ReactProp(name = "keyboardDismissMode")
   public void setKeyboardDismissMode(ReactDrawerLayout view, @Nullable String value) {}
 
   @Override
+  @ReactProp(name = "drawerBackgroundColor", customType = "Color")
   public void setDrawerBackgroundColor(ReactDrawerLayout view, @Nullable Integer value) {}
 
   @Override
+  @ReactProp(name = "statusBarBackgroundColor", customType = "Color")
   public void setStatusBarBackgroundColor(ReactDrawerLayout view, @Nullable Integer value) {}
 
   @Override
@@ -210,12 +220,18 @@ public class ReactDrawerLayoutManager extends ViewGroupManager<ReactDrawerLayout
 
   @Override
   public @Nullable Map getExportedCustomDirectEventTypeConstants() {
-    return MapBuilder.of(
-        DrawerSlideEvent.EVENT_NAME, MapBuilder.of("registrationName", "onDrawerSlide"),
-        DrawerOpenedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onDrawerOpen"),
-        DrawerClosedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onDrawerClose"),
-        DrawerStateChangedEvent.EVENT_NAME,
-            MapBuilder.of("registrationName", "onDrawerStateChanged"));
+    @Nullable
+    Map<String, Object> baseEventTypeConstants = super.getExportedCustomDirectEventTypeConstants();
+    Map<String, Object> eventTypeConstants =
+        baseEventTypeConstants == null ? new HashMap<String, Object>() : baseEventTypeConstants;
+    eventTypeConstants.putAll(
+        MapBuilder.of(
+            DrawerSlideEvent.EVENT_NAME, MapBuilder.of("registrationName", "onDrawerSlide"),
+            DrawerOpenedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onDrawerOpen"),
+            DrawerClosedEvent.EVENT_NAME, MapBuilder.of("registrationName", "onDrawerClose"),
+            DrawerStateChangedEvent.EVENT_NAME,
+                MapBuilder.of("registrationName", "onDrawerStateChanged")));
+    return eventTypeConstants;
   }
 
   /**

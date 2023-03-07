@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,8 +9,9 @@
  */
 
 import type {
-  PointValue,
+  DimensionValue,
   EdgeInsetsValue,
+  PointValue,
 } from '../../../../../Libraries/StyleSheet/StyleSheetTypes';
 import type {ColorValue} from '../../../../../Libraries/StyleSheet/StyleSheet';
 import type {ImageSource} from '../../../../../Libraries/Image/ImageSource';
@@ -35,8 +36,10 @@ type NativeProps = $ReadOnly<{|
   srcs?: $ReadOnlyArray<ImageSource>,
   points?: $ReadOnlyArray<PointValue>,
   edgeInsets?: $ReadOnlyArray<EdgeInsetsValue>,
+  dimensions?: $ReadOnlyArray<DimensionValue>,
   sizes?: WithDefault<$ReadOnlyArray<'small' | 'large'>, 'small'>,
   object?: $ReadOnlyArray<$ReadOnly<{|prop: string|}>>,
+  arrayOfObjects?: $ReadOnlyArray<$ReadOnly<{|prop1: Float, prop2: Int32|}>>,
 |}>;
 
 export default (codegenNativeComponent<NativeProps>(

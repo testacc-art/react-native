@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,19 +11,24 @@
 
 #include <react/debug/react_native_assert.h>
 #include <react/renderer/componentregistry/ComponentDescriptorProviderRegistry.h>
+#include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/core/ShadowNodeFragment.h>
 
-namespace facebook {
-namespace react {
+#include <utility>
+
+namespace facebook::react {
 
 ComponentDescriptorRegistry::ComponentDescriptorRegistry(
-    ComponentDescriptorParameters const &parameters,
-    ComponentDescriptorProviderRegistry const &providerRegistry)
-    : parameters_(parameters), providerRegistry_(providerRegistry) {}
+    ComponentDescriptorParameters parameters,
+    ComponentDescriptorProviderRegistry const &providerRegistry,
+    ContextContainer::Shared contextContainer)
+    : parameters_(std::move(parameters)),
+      providerRegistry_(providerRegistry),
+      contextContainer_(std::move(contextContainer)) {}
 
 void ComponentDescriptorRegistry::add(
     ComponentDescriptorProvider componentDescriptorProvider) const {
-  std::unique_lock<better::shared_mutex> lock(mutex_);
+  std::unique_lock lock(mutex_);
 
   auto componentDescriptor = componentDescriptorProvider.constructor(
       {parameters_.eventDispatcher,
@@ -44,7 +49,7 @@ void ComponentDescriptorRegistry::add(
 }
 
 void ComponentDescriptorRegistry::registerComponentDescriptor(
-    SharedComponentDescriptor componentDescriptor) const {
+    const SharedComponentDescriptor &componentDescriptor) const {
   ComponentHandle componentHandle = componentDescriptor->getComponentHandle();
   _registryByHandle[componentHandle] = componentDescriptor;
 
@@ -54,15 +59,15 @@ void ComponentDescriptorRegistry::registerComponentDescriptor(
 
 ComponentDescriptor const &ComponentDescriptorRegistry::at(
     std::string const &componentName) const {
-  std::shared_lock<better::shared_mutex> lock(mutex_);
+  std::shared_lock lock(mutex_);
 
   auto unifiedComponentName = componentNameByReactViewName(componentName);
 
   auto it = _registryByName.find(unifiedComponentName);
   if (it == _registryByName.end()) {
-    mutex_.unlock_shared();
+    lock.unlock();
     providerRegistry_.request(unifiedComponentName.c_str());
-    mutex_.lock_shared();
+    lock.lock();
 
     it = _registryByName.find(unifiedComponentName);
 
@@ -91,7 +96,7 @@ ComponentDescriptor const &ComponentDescriptorRegistry::at(
 ComponentDescriptor const *ComponentDescriptorRegistry::
     findComponentDescriptorByHandle_DO_NOT_USE_THIS_IS_BROKEN(
         ComponentHandle componentHandle) const {
-  std::shared_lock<better::shared_mutex> lock(mutex_);
+  std::shared_lock lock(mutex_);
 
   auto iterator = _registryByHandle.find(componentHandle);
   if (iterator == _registryByHandle.end()) {
@@ -103,24 +108,20 @@ ComponentDescriptor const *ComponentDescriptorRegistry::
 
 ComponentDescriptor const &ComponentDescriptorRegistry::at(
     ComponentHandle componentHandle) const {
-  std::shared_lock<better::shared_mutex> lock(mutex_);
+  std::shared_lock lock(mutex_);
 
   return *_registryByHandle.at(componentHandle);
 }
 
 bool ComponentDescriptorRegistry::hasComponentDescriptorAt(
     ComponentHandle componentHandle) const {
-  std::shared_lock<better::shared_mutex> lock(mutex_);
+  std::shared_lock lock(mutex_);
 
   auto iterator = _registryByHandle.find(componentHandle);
-  if (iterator == _registryByHandle.end()) {
-    return false;
-  }
-
-  return true;
+  return iterator != _registryByHandle.end();
 }
 
-SharedShadowNode ComponentDescriptorRegistry::createNode(
+ShadowNode::Shared ComponentDescriptorRegistry::createNode(
     Tag tag,
     std::string const &viewName,
     SurfaceId surfaceId,
@@ -130,10 +131,11 @@ SharedShadowNode ComponentDescriptorRegistry::createNode(
   auto const &componentDescriptor = this->at(unifiedComponentName);
 
   auto const fragment = ShadowNodeFamilyFragment{tag, surfaceId, nullptr};
-  auto family =
-      componentDescriptor.createFamily(fragment, std::move(eventTarget));
-  auto const props =
-      componentDescriptor.cloneProps(nullptr, RawProps(propsDynamic));
+  auto family = componentDescriptor.createFamily(fragment, eventTarget);
+  auto const props = componentDescriptor.cloneProps(
+      PropsParserContext{surfaceId, *contextContainer_.get()},
+      nullptr,
+      RawProps(propsDynamic));
   auto const state =
       componentDescriptor.createInitialState(ShadowNodeFragment{props}, family);
 
@@ -147,7 +149,7 @@ SharedShadowNode ComponentDescriptorRegistry::createNode(
 }
 
 void ComponentDescriptorRegistry::setFallbackComponentDescriptor(
-    SharedComponentDescriptor descriptor) {
+    const SharedComponentDescriptor &descriptor) {
   _fallbackComponentDescriptor = descriptor;
   registerComponentDescriptor(descriptor);
 }
@@ -157,5 +159,4 @@ ComponentDescriptorRegistry::getFallbackComponentDescriptor() const {
   return _fallbackComponentDescriptor;
 }
 
-} // namespace react
-} // namespace facebook
+} // namespace facebook::react

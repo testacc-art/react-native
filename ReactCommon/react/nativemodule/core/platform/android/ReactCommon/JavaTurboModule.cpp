@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,6 +14,8 @@
 
 #include <ReactCommon/TurboModule.h>
 #include <ReactCommon/TurboModulePerfLogger.h>
+#include <ReactCommon/TurboModuleUtils.h>
+#include <butter/function.h>
 #include <jsi/JSIDynamic.h>
 #include <react/debug/react_native_assert.h>
 #include <react/jni/NativeMap.h>
@@ -22,10 +24,10 @@
 
 #include "JavaTurboModule.h"
 
-namespace TMPL = facebook::react::TurboModulePerfLogger;
-
 namespace facebook {
 namespace react {
+
+namespace TMPL = TurboModulePerfLogger;
 
 JavaTurboModule::JavaTurboModule(const InitParams &params)
     : TurboModule(params.moduleName, params.jsInvoker),
@@ -52,18 +54,20 @@ JavaTurboModule::~JavaTurboModule() {
   });
 }
 
-bool JavaTurboModule::useTurboModulesRAIICallbackManager_ = false;
-void JavaTurboModule::enableUseTurboModulesRAIICallbackManager(bool enable) {
-  JavaTurboModule::useTurboModulesRAIICallbackManager_ = enable;
-}
-
 namespace {
+
+struct JNIArgs {
+  JNIArgs(size_t count) : args_(count) {}
+  std::vector<jvalue> args_;
+  std::vector<jobject> globalRefs_;
+};
+
 jni::local_ref<JCxxCallbackImpl::JavaPart> createJavaCallbackFromJSIFunction(
     jsi::Function &&function,
     jsi::Runtime &rt,
-    std::shared_ptr<CallInvoker> jsInvoker) {
+    const std::shared_ptr<CallInvoker> &jsInvoker) {
   auto weakWrapper =
-      react::CallbackWrapper::createWeak(std::move(function), rt, jsInvoker);
+      CallbackWrapper::createWeak(std::move(function), rt, jsInvoker);
 
   // This needs to be a shared_ptr because:
   // 1. It cannot be unique_ptr. std::function is copyable but unique_ptr is
@@ -72,16 +76,15 @@ jni::local_ref<JCxxCallbackImpl::JavaPart> createJavaCallbackFromJSIFunction(
   // 3. It cannot be a value, because that would be deleted as soon as this
   // function returns.
   auto callbackWrapperOwner =
-      (JavaTurboModule::useTurboModulesRAIICallbackManager_
-           ? std::make_shared<RAIICallbackWrapperDestroyer>(weakWrapper)
-           : nullptr);
+      std::make_shared<RAIICallbackWrapperDestroyer>(weakWrapper);
 
-  std::function<void(folly::dynamic)> fn =
-      [weakWrapper, callbackWrapperOwner, wrapperWasCalled = false](
-          folly::dynamic responses) mutable {
+  return JCxxCallbackImpl::newObjectCxxArgs(
+      [weakWrapper = std::move(weakWrapper),
+       callbackWrapperOwner = std::move(callbackWrapperOwner),
+       wrapperWasCalled = false](folly::dynamic responses) mutable {
         if (wrapperWasCalled) {
           throw std::runtime_error(
-              "callback 2 arg cannot be called more than once");
+              "Callback arg cannot be called more than once");
         }
 
         auto strongWrapper = weakWrapper.lock();
@@ -90,48 +93,29 @@ jni::local_ref<JCxxCallbackImpl::JavaPart> createJavaCallbackFromJSIFunction(
         }
 
         strongWrapper->jsInvoker().invokeAsync(
-            [weakWrapper, callbackWrapperOwner, responses]() mutable {
+            [weakWrapper = std::move(weakWrapper),
+             callbackWrapperOwner = std::move(callbackWrapperOwner),
+             responses = std::move(responses)]() {
               auto strongWrapper2 = weakWrapper.lock();
               if (!strongWrapper2) {
                 return;
               }
 
-              // TODO (T43155926) valueFromDynamic already returns a Value
-              // array. Don't iterate again
-              jsi::Value args =
-                  jsi::valueFromDynamic(strongWrapper2->runtime(), responses);
-              auto argsArray = args.getObject(strongWrapper2->runtime())
-                                   .asArray(strongWrapper2->runtime());
-              std::vector<jsi::Value> result;
-              for (size_t i = 0; i < argsArray.size(strongWrapper2->runtime());
-                   i++) {
-                result.emplace_back(
-                    strongWrapper2->runtime(),
-                    argsArray.getValueAtIndex(strongWrapper2->runtime(), i));
+              std::vector<jsi::Value> args;
+              args.reserve(responses.size());
+              for (const auto &val : responses) {
+                args.emplace_back(
+                    jsi::valueFromDynamic(strongWrapper2->runtime(), val));
               }
+
               strongWrapper2->callback().call(
                   strongWrapper2->runtime(),
-                  (const jsi::Value *)result.data(),
-                  result.size());
-
-              if (JavaTurboModule::useTurboModulesRAIICallbackManager_) {
-                callbackWrapperOwner.reset();
-              } else {
-                strongWrapper2->destroy();
-              }
+                  (const jsi::Value *)args.data(),
+                  args.size());
             });
 
         wrapperWasCalled = true;
-      };
-
-  return JCxxCallbackImpl::newObjectCxxArgs(fn);
-}
-
-template <typename T>
-std::string to_string(T v) {
-  std::ostringstream stream;
-  stream << v;
-  return stream.str();
+      });
 }
 
 // This is used for generating short exception strings.
@@ -149,7 +133,7 @@ std::string stringifyJSIValue(const jsi::Value &v, jsi::Runtime *rt = nullptr) {
   }
 
   if (v.isNumber()) {
-    return "a number (" + to_string(v.getNumber()) + ")";
+    return "a number (" + std::to_string(v.getNumber()) + ")";
   }
 
   if (v.isString()) {
@@ -170,7 +154,7 @@ class JavaTurboModuleArgumentConversionException : public std::runtime_error {
       const jsi::Value *arg,
       jsi::Runtime *rt)
       : std::runtime_error(
-            "Expected argument " + to_string(index) + " of method \"" +
+            "Expected argument " + std::to_string(index) + " of method \"" +
             methodName + "\" to be a " + expectedType + ", but got " +
             stringifyJSIValue(*arg, rt)) {}
 };
@@ -183,7 +167,7 @@ class JavaTurboModuleInvalidArgumentTypeException : public std::runtime_error {
       const std::string &methodName)
       : std::runtime_error(
             "Called method \"" + methodName + "\" with unsupported type " +
-            actualType + " at argument " + to_string(argIndex)) {}
+            actualType + " at argument " + std::to_string(argIndex)) {}
 };
 
 class JavaTurboModuleInvalidArgumentCountException : public std::runtime_error {
@@ -194,9 +178,9 @@ class JavaTurboModuleInvalidArgumentCountException : public std::runtime_error {
       int expectedArgCount)
       : std::runtime_error(
             "TurboModule method \"" + methodName + "\" called with " +
-            to_string(actualArgCount) +
+            std::to_string(actualArgCount) +
             " arguments (expected argument count: " +
-            to_string(expectedArgCount) + ").") {}
+            std::to_string(expectedArgCount) + ").") {}
 };
 
 /**
@@ -248,20 +232,18 @@ int32_t getUniqueId() {
   return counter++;
 }
 
-} // namespace
-
-// fnjni already does this conversion, but since we are using plain JNI, this
+// fbjni already does this conversion, but since we are using plain JNI, this
 // needs to be done again
 // TODO (axe) Reuse existing implementation as needed - the exist in
 // MethodInvoker.cpp
-JNIArgs JavaTurboModule::convertJSIArgsToJNIArgs(
+JNIArgs convertJSIArgsToJNIArgs(
     JNIEnv *env,
     jsi::Runtime &rt,
-    std::string methodName,
-    std::vector<std::string> methodArgTypes,
+    const std::string &methodName,
+    const std::vector<std::string> &methodArgTypes,
     const jsi::Value *args,
     size_t count,
-    std::shared_ptr<CallInvoker> jsInvoker,
+    const std::shared_ptr<CallInvoker> &jsInvoker,
     TurboModuleMethodValueKind valueKind) {
   unsigned int expectedArgumentCount = valueKind == PromiseKind
       ? methodArgTypes.size() - 1
@@ -288,11 +270,8 @@ JNIArgs JavaTurboModule::convertJSIArgsToJNIArgs(
     return obj;
   };
 
-  jclass booleanClass = nullptr;
-  jclass doubleClass = nullptr;
-
   for (unsigned int argIndex = 0; argIndex < count; argIndex += 1) {
-    std::string type = methodArgTypes.at(argIndex);
+    const std::string &type = methodArgTypes.at(argIndex);
 
     const jsi::Value *arg = &args[argIndex];
     jvalue *jarg = &jargs[argIndex];
@@ -302,7 +281,6 @@ JNIArgs JavaTurboModule::convertJSIArgsToJNIArgs(
         throw JavaTurboModuleArgumentConversionException(
             "number", argIndex, methodName, arg, &rt);
       }
-
       jarg->d = arg->getNumber();
       continue;
     }
@@ -312,107 +290,63 @@ JNIArgs JavaTurboModule::convertJSIArgsToJNIArgs(
         throw JavaTurboModuleArgumentConversionException(
             "boolean", argIndex, methodName, arg, &rt);
       }
-
       jarg->z = (jboolean)arg->getBool();
       continue;
     }
 
-    if (!(type == "Ljava/lang/Double;" || type == "Ljava/lang/Boolean;" ||
-          type == "Ljava/lang/String;" ||
-          type == "Lcom/facebook/react/bridge/ReadableArray;" ||
-          type == "Lcom/facebook/react/bridge/Callback;" ||
-          type == "Lcom/facebook/react/bridge/ReadableMap;")) {
-      throw JavaTurboModuleInvalidArgumentTypeException(
-          type, argIndex, methodName);
-    }
-
     if (arg->isNull() || arg->isUndefined()) {
       jarg->l = nullptr;
-      continue;
-    }
-
-    if (type == "Ljava/lang/Double;") {
+    } else if (type == "Ljava/lang/Double;") {
       if (!arg->isNumber()) {
         throw JavaTurboModuleArgumentConversionException(
             "number", argIndex, methodName, arg, &rt);
       }
-
-      if (doubleClass == nullptr) {
-        doubleClass = env->FindClass("java/lang/Double");
-      }
-
-      jmethodID doubleConstructor =
-          env->GetMethodID(doubleClass, "<init>", "(D)V");
       jarg->l = makeGlobalIfNecessary(
-          env->NewObject(doubleClass, doubleConstructor, arg->getNumber()));
-      continue;
-    }
-
-    if (type == "Ljava/lang/Boolean;") {
+          jni::JDouble::valueOf(arg->getNumber()).release());
+    } else if (type == "Ljava/lang/Boolean;") {
       if (!arg->isBool()) {
         throw JavaTurboModuleArgumentConversionException(
             "boolean", argIndex, methodName, arg, &rt);
       }
-
-      if (booleanClass == nullptr) {
-        booleanClass = env->FindClass("java/lang/Boolean");
-      }
-
-      jmethodID booleanConstructor =
-          env->GetMethodID(booleanClass, "<init>", "(Z)V");
       jarg->l = makeGlobalIfNecessary(
-          env->NewObject(booleanClass, booleanConstructor, arg->getBool()));
-      continue;
-    }
-
-    if (type == "Ljava/lang/String;") {
+          jni::JBoolean::valueOf(arg->getBool()).release());
+    } else if (type == "Ljava/lang/String;") {
       if (!arg->isString()) {
         throw JavaTurboModuleArgumentConversionException(
             "string", argIndex, methodName, arg, &rt);
       }
-
       jarg->l = makeGlobalIfNecessary(
           env->NewStringUTF(arg->getString(rt).utf8(rt).c_str()));
-      continue;
-    }
-
-    if (type == "Lcom/facebook/react/bridge/ReadableArray;") {
-      if (!(arg->isObject() && arg->getObject(rt).isArray(rt))) {
-        throw JavaTurboModuleArgumentConversionException(
-            "Array", argIndex, methodName, arg, &rt);
-      }
-
-      auto dynamicFromValue = jsi::dynamicFromValue(rt, *arg);
-      auto jParams =
-          ReadableNativeArray::newObjectCxxArgs(std::move(dynamicFromValue));
-      jarg->l = makeGlobalIfNecessary(jParams.release());
-      continue;
-    }
-
-    if (type == "Lcom/facebook/react/bridge/Callback;") {
+    } else if (type == "Lcom/facebook/react/bridge/Callback;") {
       if (!(arg->isObject() && arg->getObject(rt).isFunction(rt))) {
         throw JavaTurboModuleArgumentConversionException(
             "Function", argIndex, methodName, arg, &rt);
       }
-
       jsi::Function fn = arg->getObject(rt).getFunction(rt);
       jarg->l = makeGlobalIfNecessary(
           createJavaCallbackFromJSIFunction(std::move(fn), rt, jsInvoker)
               .release());
-      continue;
-    }
-
-    if (type == "Lcom/facebook/react/bridge/ReadableMap;") {
+    } else if (type == "Lcom/facebook/react/bridge/ReadableArray;") {
+      if (!(arg->isObject() && arg->getObject(rt).isArray(rt))) {
+        throw JavaTurboModuleArgumentConversionException(
+            "Array", argIndex, methodName, arg, &rt);
+      }
+      auto dynamicFromValue = jsi::dynamicFromValue(rt, *arg);
+      auto jParams =
+          ReadableNativeArray::newObjectCxxArgs(std::move(dynamicFromValue));
+      jarg->l = makeGlobalIfNecessary(jParams.release());
+    } else if (type == "Lcom/facebook/react/bridge/ReadableMap;") {
       if (!(arg->isObject())) {
         throw JavaTurboModuleArgumentConversionException(
             "Object", argIndex, methodName, arg, &rt);
       }
-
       auto dynamicFromValue = jsi::dynamicFromValue(rt, *arg);
       auto jParams =
           ReadableNativeMap::createWithContents(std::move(dynamicFromValue));
       jarg->l = makeGlobalIfNecessary(jParams.release());
-      continue;
+    } else {
+      throw JavaTurboModuleInvalidArgumentTypeException(
+          type, argIndex, methodName);
     }
   }
 
@@ -429,12 +363,13 @@ jsi::Value convertFromJMapToValue(JNIEnv *env, jsi::Runtime &rt, jobject arg) {
       jArguments,
       "makeNativeMap",
       "(Ljava/util/Map;)Lcom/facebook/react/bridge/WritableNativeMap;");
-  auto constants =
-      (jobject)env->CallStaticObjectMethod(jArguments, jMakeNativeMap, arg);
+  auto constants = env->CallStaticObjectMethod(jArguments, jMakeNativeMap, arg);
   auto jResult = jni::adopt_local(constants);
   auto result = jni::static_ref_cast<NativeMap::jhybridobject>(jResult);
   return jsi::valueFromDynamic(rt, result->cthis()->consume());
 }
+
+} // namespace
 
 jsi::Value JavaTurboModule::invokeJavaMethod(
     jsi::Runtime &runtime,
@@ -442,7 +377,8 @@ jsi::Value JavaTurboModule::invokeJavaMethod(
     const std::string &methodNameStr,
     const std::string &methodSignature,
     const jsi::Value *args,
-    size_t argCount) {
+    size_t argCount,
+    jmethodID &methodID) {
   const char *methodName = methodNameStr.c_str();
   const char *moduleName = name_.c_str();
 
@@ -491,12 +427,7 @@ jsi::Value JavaTurboModule::invokeJavaMethod(
    */
   jni::JniLocalScope scope(env, estimatedLocalRefCount);
 
-  jclass cls = env->GetObjectClass(instance);
-  jmethodID methodID =
-      env->GetMethodID(cls, methodName, methodSignature.c_str());
-
-  auto checkJNIErrorForMethodCall =
-      [methodName, moduleName, isMethodSync]() -> void {
+  auto checkJNIErrorForMethodCall = [&]() -> void {
     try {
       FACEBOOK_JNI_THROW_PENDING_EXCEPTION();
     } catch (...) {
@@ -509,9 +440,14 @@ jsi::Value JavaTurboModule::invokeJavaMethod(
     }
   };
 
-  // If the method signature doesn't match, show a redbox here instead of
-  // crashing later.
-  checkJNIErrorForMethodCall();
+  if (!methodID) {
+    jclass cls = env->GetObjectClass(instance);
+    methodID = env->GetMethodID(cls, methodName, methodSignature.c_str());
+
+    // If the method signature doesn't match, show a redbox here instead of
+    // crashing later.
+    checkJNIErrorForMethodCall();
+  }
 
   // TODO(T43933641): Refactor to remove this special-casing
   if (methodNameStr == "getConstants") {
@@ -560,81 +496,73 @@ jsi::Value JavaTurboModule::invokeJavaMethod(
           methodSignature.substr(methodSignature.find_last_of(')') + 1);
       if (returnType == "Ljava/lang/Boolean;") {
         auto returnObject =
-            (jobject)env->CallObjectMethodA(instance, methodID, jargs.data());
+            env->CallObjectMethodA(instance, methodID, jargs.data());
         checkJNIErrorForMethodCall();
 
         TMPL::syncMethodCallExecutionEnd(moduleName, methodName);
         TMPL::syncMethodCallReturnConversionStart(moduleName, methodName);
 
-        jsi::Value returnValue = jsi::Value::null();
-        if (returnObject != nullptr) {
-          jclass booleanClass = env->FindClass("java/lang/Boolean");
-          jmethodID booleanValueMethod =
-              env->GetMethodID(booleanClass, "booleanValue", "()Z");
-          bool returnBoolean =
-              (bool)env->CallBooleanMethod(returnObject, booleanValueMethod);
-          checkJNIErrorForMethodCall();
-          returnValue = jsi::Value(returnBoolean);
+        auto returnValue = jsi::Value::null();
+        if (returnObject) {
+          auto booleanObj = jni::adopt_local(
+              static_cast<jni::JBoolean::javaobject>(returnObject));
+          returnValue = jsi::Value(static_cast<bool>(booleanObj->value()));
         }
 
         TMPL::syncMethodCallReturnConversionEnd(moduleName, methodName);
         TMPL::syncMethodCallEnd(moduleName, methodName);
         return returnValue;
+      } else {
+        bool returnBoolean =
+            (bool)env->CallBooleanMethodA(instance, methodID, jargs.data());
+        checkJNIErrorForMethodCall();
+
+        TMPL::syncMethodCallExecutionEnd(moduleName, methodName);
+        TMPL::syncMethodCallReturnConversionStart(moduleName, methodName);
+
+        jsi::Value returnValue = jsi::Value(returnBoolean);
+
+        TMPL::syncMethodCallReturnConversionEnd(moduleName, methodName);
+        TMPL::syncMethodCallEnd(moduleName, methodName);
+
+        return returnValue;
       }
-
-      bool returnBoolean =
-          (bool)env->CallBooleanMethodA(instance, methodID, jargs.data());
-      checkJNIErrorForMethodCall();
-
-      TMPL::syncMethodCallExecutionEnd(moduleName, methodName);
-      TMPL::syncMethodCallReturnConversionStart(moduleName, methodName);
-
-      jsi::Value returnValue = jsi::Value(returnBoolean);
-
-      TMPL::syncMethodCallReturnConversionEnd(moduleName, methodName);
-      TMPL::syncMethodCallEnd(moduleName, methodName);
-
-      return returnValue;
     }
     case NumberKind: {
       std::string returnType =
           methodSignature.substr(methodSignature.find_last_of(')') + 1);
       if (returnType == "Ljava/lang/Double;") {
         auto returnObject =
-            (jobject)env->CallObjectMethodA(instance, methodID, jargs.data());
+            env->CallObjectMethodA(instance, methodID, jargs.data());
         checkJNIErrorForMethodCall();
 
         TMPL::syncMethodCallExecutionEnd(moduleName, methodName);
         TMPL::syncMethodCallReturnConversionStart(moduleName, methodName);
 
-        jsi::Value returnValue = jsi::Value::null();
-        if (returnObject != nullptr) {
-          jclass doubleClass = env->FindClass("java/lang/Double");
-          jmethodID doubleValueMethod =
-              env->GetMethodID(doubleClass, "doubleValue", "()D");
-          double returnDouble =
-              (double)env->CallDoubleMethod(returnObject, doubleValueMethod);
-          checkJNIErrorForMethodCall();
-          returnValue = jsi::Value(returnDouble);
+        auto returnValue = jsi::Value::null();
+        if (returnObject) {
+          auto doubleObj = jni::adopt_local(
+              static_cast<jni::JDouble::javaobject>(returnObject));
+          returnValue = jsi::Value(doubleObj->value());
         }
 
         TMPL::syncMethodCallReturnConversionEnd(moduleName, methodName);
         TMPL::syncMethodCallEnd(moduleName, methodName);
         return returnValue;
+      } else {
+        double returnDouble =
+            (double)env->CallDoubleMethodA(instance, methodID, jargs.data());
+        checkJNIErrorForMethodCall();
+
+        TMPL::syncMethodCallExecutionEnd(moduleName, methodName);
+        TMPL::syncMethodCallReturnConversionStart(moduleName, methodName);
+
+        jsi::Value returnValue = jsi::Value(returnDouble);
+
+        TMPL::syncMethodCallReturnConversionEnd(moduleName, methodName);
+        TMPL::syncMethodCallEnd(moduleName, methodName);
+        return returnValue;
       }
-
-      double returnDouble =
-          (double)env->CallDoubleMethodA(instance, methodID, jargs.data());
-      checkJNIErrorForMethodCall();
-
-      TMPL::syncMethodCallExecutionEnd(moduleName, methodName);
-      TMPL::syncMethodCallReturnConversionStart(moduleName, methodName);
-
-      jsi::Value returnValue = jsi::Value(returnDouble);
-
-      TMPL::syncMethodCallReturnConversionEnd(moduleName, methodName);
-      TMPL::syncMethodCallEnd(moduleName, methodName);
-      return returnValue;
     }
     case StringKind: {
       auto returnString =
@@ -659,7 +587,7 @@ jsi::Value JavaTurboModule::invokeJavaMethod(
     }
     case ObjectKind: {
       auto returnObject =
-          (jobject)env->CallObjectMethodA(instance, methodID, jargs.data());
+          env->CallObjectMethodA(instance, methodID, jargs.data());
       checkJNIErrorForMethodCall();
 
       TMPL::syncMethodCallExecutionEnd(moduleName, methodName);

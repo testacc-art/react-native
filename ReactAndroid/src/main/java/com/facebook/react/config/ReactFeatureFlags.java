@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -26,11 +26,31 @@ public class ReactFeatureFlags {
   public static volatile boolean useTurboModules = false;
 
   /**
-   * Should application use the new TM callback manager in Cxx? This is assumed to be a sane
-   * default, but it's new. We will delete once (1) we know it's safe to ship and (2) we have
-   * quantified impact.
+   * Should this application use the new (Fabric) Renderer? If yes, all rendering in this app will
+   * use Fabric instead of the legacy renderer.
    */
-  public static volatile boolean useTurboModulesRAIICallbackManager = false;
+  public static volatile boolean enableFabricRenderer = false;
+
+  /**
+   * Feature flag to enable the new bridgeless architecture. Note: Enabling this will force enable
+   * the following flags: `useTurboModules` & `enableFabricRenderer`.
+   */
+  public static boolean enableBridgelessArchitecture = false;
+
+  /**
+   * Does the bridgeless architecture log soft exceptions. Could be useful for tracking down issues.
+   */
+  public static volatile boolean enableBridgelessArchitectureSoftExceptions = false;
+
+  /** Does the bridgeless architecture use the new create/reload/destroy routines */
+  public static volatile boolean enableBridgelessArchitectureNewCreateReloadDestroy = false;
+
+  /**
+   * After TurboModules and Fabric are enabled, we need to ensure that the legacy NativeModule isn't
+   * isn't used. So, turn this flag on to trigger warnings whenever the legacy NativeModule system
+   * is used.
+   */
+  public static volatile boolean warnOnLegacyNativeModuleSystemUse = false;
 
   /** Should we dispatch TurboModule methods with promise returns to the NativeModules thread? */
   public static volatile boolean enableTurboModulePromiseAsyncDispatch = false;
@@ -38,44 +58,70 @@ public class ReactFeatureFlags {
   /** This feature flag enables logs for Fabric */
   public static boolean enableFabricLogs = false;
 
-  /** Feature flag to configure eager initialization of Fabric */
-  public static boolean eagerInitializeFabric = false;
+  /** Feature flag to configure eager attachment of the root view/initialisation of the JS code */
+  public static boolean enableEagerRootViewAttachment = false;
 
-  /** Enables Static ViewConfig in RN Android native code. */
-  public static boolean enableExperimentalStaticViewConfigs = false;
+  /* Enables or disables MapBuffer use in Props infrastructure. */
+  public static boolean useMapBufferProps = false;
 
-  /** Enables a more aggressive cleanup during destruction of ReactContext */
-  public static boolean enableReactContextCleanupFix = false;
+  /** Enables or disables calculation of Transformed Frames */
+  public static boolean calculateTransformedFramesEnabled = false;
 
-  /** Feature flag to configure eager initialization of MapBuffer So file */
-  public static boolean enableEagerInitializeMapBufferSoFile = false;
+  public static boolean dispatchPointerEvents = false;
 
-  private static boolean mapBufferSerializationEnabled = false;
+  /** Feature Flag to enable the pending event queue in fabric before mounting views */
+  public static boolean enableFabricPendingEventQueue = false;
 
-  /** Enables or disables MapBuffer Serialization */
-  public static void setMapBufferSerializationEnabled(boolean enabled) {
-    mapBufferSerializationEnabled = enabled;
-  }
+  /**
+   * Feature flag that controls how turbo modules are exposed to JS
+   *
+   * <ul>
+   *   <li>0 = as a HostObject
+   *   <li>1 = as a plain object, backed with a HostObject as prototype
+   *   <li>2 = as a plain object, with all methods eagerly configured
+   * </ul>
+   */
+  public static int turboModuleBindingMode = 0;
 
-  public static boolean isMapBufferSerializationEnabled() {
-    return mapBufferSerializationEnabled;
-  }
+  /**
+   * Feature Flag to enable View Recycling. When enabled, individual ViewManagers must still opt-in.
+   */
+  public static boolean enableViewRecycling = false;
 
-  /** Enables Fabric for LogBox */
-  public static boolean enableFabricInLogBox = false;
+  /**
+   * Enable prop iterator setter-style construction of Props in C++ (this flag is not used in Java).
+   */
+  public static boolean enableCppPropsIteratorSetter = false;
 
-  public static boolean enableLockFreeEventDispatcher = false;
+  /**
+   * Allow Differentiator.cpp and FabricMountingManager.cpp to generate a RemoveDeleteTree mega-op.
+   */
+  public static boolean enableRemoveDeleteTreeInstruction = false;
 
-  //
-  // ScrollView C++ UpdateState vs onScroll race fixes
-  //
+  /** Temporary flag to allow execution of mount items up to 15ms earlier than normal. */
+  public static boolean enableEarlyScheduledMountItemExecution = false;
 
-  /* Enables a "state race condition fix" for ScrollViews StateUpdate + onScroll event emitter */
-  public static boolean enableScrollViewStateEventRaceFix = false;
+  /**
+   * Allow closing the small gap that appears between paths when drawing a rounded View with a
+   * border.
+   */
+  public static boolean enableCloseVisibleGapBetweenPaths = true;
 
-  /* Enables another "state race condition fix" for ScrollViews StateUpdate + onScroll event emitter. Races a StateUpdate with every onScroll event. */
-  public static boolean enableScrollViewStateEventAlwaysRace = false;
+  /**
+   * Allow fix in layout animation to drop delete...create mutations which could cause missing view
+   * state in Fabric SurfaceMountingManager.
+   */
+  public static boolean reduceDeleteCreateMutationLayoutAnimation = true;
 
-  /* Configure a min scroll delta for UpdateState to be called while still actively scrolling. */
-  public static int scrollViewUpdateStateMinScrollDelta = 0;
+  /**
+   * Allow fix to drop delete...create mutations which could cause missing view state in Fabric
+   * SurfaceMountingManager.
+   */
+  public static boolean reduceDeleteCreateMutation = false;
+
+  /**
+   * Use JSI NativeState API to store references to native objects rather than the more expensive
+   * HostObject pattern
+   */
+  public static boolean useNativeState = false;
 }

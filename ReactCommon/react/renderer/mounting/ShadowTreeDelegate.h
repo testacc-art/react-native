@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -34,8 +34,8 @@ class ShadowTreeDelegate {
    * Called right after Shadow Tree commit a new state of the tree.
    */
   virtual void shadowTreeDidFinishTransaction(
-      ShadowTree const &shadowTree,
-      MountingCoordinator::Shared const &mountingCoordinator) const = 0;
+      MountingCoordinator::Shared mountingCoordinator,
+      bool mountSynchronously) const = 0;
 
   virtual ~ShadowTreeDelegate() noexcept = default;
 };

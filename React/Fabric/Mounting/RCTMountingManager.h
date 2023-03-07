@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -10,9 +10,11 @@
 #import <React/RCTMountingManagerDelegate.h>
 #import <React/RCTPrimitives.h>
 #import <react/renderer/core/ComponentDescriptor.h>
+#import <react/renderer/core/RawProps.h>
 #import <react/renderer/core/ReactPrimitives.h>
 #import <react/renderer/mounting/MountingCoordinator.h>
 #import <react/renderer/mounting/ShadowView.h>
+#import <react/utils/ContextContainer.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -25,6 +27,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, weak) id<RCTMountingManagerDelegate> delegate;
 @property (nonatomic, strong) RCTComponentViewRegistry *componentViewRegistry;
+
+- (void)setContextContainer:(facebook::react::ContextContainer::Shared)contextContainer;
 
 /**
  * Designates the view as a rendering viewport of a React Native surface.
@@ -44,7 +48,7 @@ NS_ASSUME_NONNULL_BEGIN
  * Schedule a mounting transaction to be performed on the main thread.
  * Can be called from any thread.
  */
-- (void)scheduleTransaction:(facebook::react::MountingCoordinator::Shared const &)mountingCoordinator;
+- (void)scheduleTransaction:(facebook::react::MountingCoordinator::Shared)mountingCoordinator;
 
 /**
  * Dispatch a command to be performed on the main thread.
@@ -60,7 +64,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)setIsJSResponder:(BOOL)isJSResponder
     blockNativeResponder:(BOOL)blockNativeResponder
-           forShadowView:(facebook::react::ShadowView)shadowView;
+           forShadowView:(facebook::react::ShadowView const &)shadowView;
 
 - (void)synchronouslyUpdateViewOnUIThread:(ReactTag)reactTag
                              changedProps:(NSDictionary *)props

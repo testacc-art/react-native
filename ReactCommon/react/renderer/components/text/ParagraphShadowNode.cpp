@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -13,13 +13,13 @@
 #include <react/renderer/attributedstring/AttributedStringBox.h>
 #include <react/renderer/components/view/ViewShadowNode.h>
 #include <react/renderer/components/view/conversions.h>
+#include <react/renderer/core/TraitCast.h>
 #include <react/renderer/graphics/rounding.h>
 #include <react/renderer/telemetry/TransactionTelemetry.h>
 
 #include "ParagraphState.h"
 
-namespace facebook {
-namespace react {
+namespace facebook::react {
 
 using Content = ParagraphShadowNode::Content;
 
@@ -70,7 +70,7 @@ Content ParagraphShadowNode::getContentWithMeasuredAttachments(
     auto laytableShadowNode =
         traitCast<LayoutableShadowNode const *>(attachment.shadowNode);
 
-    if (!laytableShadowNode) {
+    if (laytableShadowNode == nullptr) {
       continue;
     }
 
@@ -93,9 +93,9 @@ Content ParagraphShadowNode::getContentWithMeasuredAttachments(
 }
 
 void ParagraphShadowNode::setTextLayoutManager(
-    SharedTextLayoutManager textLayoutManager) {
+    std::shared_ptr<TextLayoutManager const> textLayoutManager) {
   ensureUnsealed();
-  textLayoutManager_ = textLayoutManager;
+  textLayoutManager_ = std::move(textLayoutManager);
 }
 
 void ParagraphShadowNode::updateStateIfNeeded(Content const &content) {
@@ -189,7 +189,8 @@ void ParagraphShadowNode::layout(LayoutContext layoutContext) {
   for (size_t i = 0; i < content.attachments.size(); i++) {
     auto &attachment = content.attachments.at(i);
 
-    if (!traitCast<LayoutableShadowNode const *>(attachment.shadowNode)) {
+    if (traitCast<LayoutableShadowNode const *>(attachment.shadowNode) ==
+        nullptr) {
       // Not a layoutable `ShadowNode`, no need to lay it out.
       continue;
     }
@@ -205,8 +206,8 @@ void ParagraphShadowNode::layout(LayoutContext layoutContext) {
     paragraphShadowNode =
         static_cast<ParagraphShadowNode *>(paragraphOwningShadowNode.get());
 
-    auto &layoutableShadowNode = const_cast<LayoutableShadowNode &>(
-        traitCast<LayoutableShadowNode const &>(*clonedShadowNode));
+    auto &layoutableShadowNode =
+        traitCast<LayoutableShadowNode &>(*clonedShadowNode);
 
     auto attachmentFrame = measurement.attachments[i].frame;
     auto attachmentSize = roundToPixel<&ceil>(
@@ -237,5 +238,4 @@ void ParagraphShadowNode::layout(LayoutContext layoutContext) {
   }
 }
 
-} // namespace react
-} // namespace facebook
+} // namespace facebook::react

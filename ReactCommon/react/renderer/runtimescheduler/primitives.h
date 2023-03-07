@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,9 +9,11 @@
 
 #include <folly/dynamic.h>
 #include <jsi/jsi.h>
+#include <react/renderer/core/CoreFeatures.h>
 #include <react/renderer/runtimescheduler/Task.h>
 
-namespace facebook::react {
+namespace facebook {
+namespace react {
 
 struct TaskWrapper : public jsi::HostObject {
   TaskWrapper(std::shared_ptr<Task> const &task) : task(task) {}
@@ -21,9 +23,15 @@ struct TaskWrapper : public jsi::HostObject {
 
 inline static jsi::Value valueFromTask(
     jsi::Runtime &runtime,
-    std::shared_ptr<Task> const &task) {
-  return jsi::Object::createFromHostObject(
-      runtime, std::make_shared<TaskWrapper>(task));
+    std::shared_ptr<Task> task) {
+  if (CoreFeatures::useNativeState) {
+    jsi::Object obj(runtime);
+    obj.setNativeState(runtime, std::move(task));
+    return obj;
+  } else {
+    return jsi::Object::createFromHostObject(
+        runtime, std::make_shared<TaskWrapper>(task));
+  }
 }
 
 inline static std::shared_ptr<Task> taskFromValue(
@@ -33,7 +41,12 @@ inline static std::shared_ptr<Task> taskFromValue(
     return nullptr;
   }
 
-  return value.getObject(runtime).getHostObject<TaskWrapper>(runtime)->task;
+  if (CoreFeatures::useNativeState) {
+    return value.getObject(runtime).getNativeState<Task>(runtime);
+  } else {
+    return value.getObject(runtime).getHostObject<TaskWrapper>(runtime)->task;
+  }
 }
 
-} // namespace facebook::react
+} // namespace react
+} // namespace facebook

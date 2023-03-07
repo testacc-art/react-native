@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,11 +8,13 @@
 #pragma once
 
 #include <glog/logging.h>
+#include <gtest/gtest.h>
 #include <algorithm>
 #include <iostream>
 #include <memory>
 #include <random>
 
+#include <react/renderer/core/PropsParserContext.h>
 #include <react/renderer/mounting/Differentiator.h>
 #include <react/renderer/mounting/stubs.h>
 
@@ -120,8 +122,12 @@ static inline ShadowNode::Unshared messWithLayoutableOnlyFlag(
     Entropy const &entropy,
     ShadowNode const &shadowNode) {
   auto oldProps = shadowNode.getProps();
+
+  ContextContainer contextContainer{};
+  PropsParserContext parserContext{-1, contextContainer};
+
   auto newProps = shadowNode.getComponentDescriptor().cloneProps(
-      oldProps, RawProps(folly::dynamic::object()));
+      parserContext, oldProps, RawProps(folly::dynamic::object()));
 
   auto &viewProps =
       const_cast<ViewProps &>(static_cast<ViewProps const &>(*newProps));
@@ -175,9 +181,12 @@ static inline ShadowNode::Unshared messWithLayoutableOnlyFlag(
 static inline ShadowNode::Unshared messWithNodeFlattenednessFlags(
     Entropy const &entropy,
     ShadowNode const &shadowNode) {
+  ContextContainer contextContainer{};
+  PropsParserContext parserContext{-1, contextContainer};
+
   auto oldProps = shadowNode.getProps();
   auto newProps = shadowNode.getComponentDescriptor().cloneProps(
-      oldProps, RawProps(folly::dynamic::object()));
+      parserContext, oldProps, RawProps(folly::dynamic::object()));
 
   auto &viewProps =
       const_cast<ViewProps &>(static_cast<ViewProps const &>(*newProps));
@@ -225,15 +234,23 @@ static inline ShadowNode::Unshared messWithYogaStyles(
       "maxWidth",     "maxHeight",     "minWidth",    "minHeight",
   };
 
+  // It is not safe to add new Yoga properties to this list. Unit tests
+  // validate specific seeds, and what they test may change and cause unrelated
+  // failures if the size of properties also changes.
+  EXPECT_EQ(properties.size(), 20);
+
   for (auto const &property : properties) {
     if (entropy.random<bool>(0.1)) {
       dynamic[property] = entropy.random<int>(0, 1024);
     }
   }
 
+  ContextContainer contextContainer{};
+  PropsParserContext parserContext{-1, contextContainer};
+
   auto oldProps = shadowNode.getProps();
   auto newProps = shadowNode.getComponentDescriptor().cloneProps(
-      oldProps, RawProps(dynamic));
+      parserContext, oldProps, RawProps(dynamic));
   return shadowNode.clone({newProps});
 }
 
@@ -263,8 +280,11 @@ static inline void alterShadowTree(
 
 static SharedViewProps generateDefaultProps(
     ComponentDescriptor const &componentDescriptor) {
+  ContextContainer contextContainer{};
+  PropsParserContext parserContext{-1, contextContainer};
+
   return std::static_pointer_cast<ViewProps const>(
-      componentDescriptor.cloneProps(nullptr, RawProps{}));
+      componentDescriptor.cloneProps(parserContext, nullptr, RawProps{}));
 }
 
 static inline ShadowNode::Shared generateShadowNodeTree(
@@ -294,7 +314,7 @@ static inline ShadowNode::Shared generateShadowNodeTree(
   return componentDescriptor.createShadowNode(
       ShadowNodeFragment{
           generateDefaultProps(componentDescriptor),
-          std::make_shared<SharedShadowNodeList>(children)},
+          std::make_shared<ShadowNode::ListOfShared>(children)},
       family);
 }
 

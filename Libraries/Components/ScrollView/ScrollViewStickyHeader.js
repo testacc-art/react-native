@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,14 +9,13 @@
  */
 
 import type {LayoutEvent} from '../../Types/CoreEventTypes';
-import setAndForwardRef from 'react-native/Libraries/Utilities/setAndForwardRef';
-import Platform from '../../Utilities/Platform';
-import StyleSheet from '../../StyleSheet/StyleSheet';
-import Animated from '../../Animated/Animated';
-import * as React from 'react';
-import {useEffect, useMemo, useRef, useCallback} from 'react';
 
-const AnimatedView = Animated.View;
+import Animated from '../../Animated/Animated';
+import StyleSheet from '../../StyleSheet/StyleSheet';
+import Platform from '../../Utilities/Platform';
+import useMergeRefs from '../../Utilities/useMergeRefs';
+import * as React from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 
 export type Props = $ReadOnly<{
   children?: React.Element<$FlowFixMe>,
@@ -32,12 +31,15 @@ export type Props = $ReadOnly<{
   hiddenOnScroll?: ?boolean,
 }>;
 
+type Instance = {
+  ...React.ElementRef<typeof Animated.View>,
+  setNextHeaderY: number => void,
+  ...
+};
+
 const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
   Props,
-  $ReadOnly<{
-    setNextHeaderY: number => void,
-    ...$Exact<React.ElementRef<typeof AnimatedView>>,
-  }>,
+  Instance,
 > = React.forwardRef(function ScrollViewStickyHeader(props, forwardedRef) {
   const {
     inverted,
@@ -47,34 +49,29 @@ const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
     nextHeaderLayoutY: _nextHeaderLayoutY,
   } = props;
 
-  const [measured, setMeasured] = React.useState<boolean>(false);
-  const [layoutY, setLayoutY] = React.useState<number>(0);
-  const [layoutHeight, setLayoutHeight] = React.useState<number>(0);
-  const [translateY, setTranslateY] = React.useState<?number>(null);
-  const [nextHeaderLayoutY, setNextHeaderLayoutY] = React.useState<?number>(
-    _nextHeaderLayoutY,
-  );
-  const [isFabric, setIsFabric] = React.useState<boolean>(false);
+  const [measured, setMeasured] = useState<boolean>(false);
+  const [layoutY, setLayoutY] = useState<number>(0);
+  const [layoutHeight, setLayoutHeight] = useState<number>(0);
+  const [translateY, setTranslateY] = useState<?number>(null);
+  const [nextHeaderLayoutY, setNextHeaderLayoutY] =
+    useState<?number>(_nextHeaderLayoutY);
+  const [isFabric, setIsFabric] = useState<boolean>(false);
 
-  const componentRef = React.useRef<?React.ElementRef<typeof AnimatedView>>();
-  const _setNativeRef = setAndForwardRef({
-    getForwardedRef: () => forwardedRef,
-    setLocalRef: ref => {
-      componentRef.current = ref;
-      if (ref) {
-        ref.setNextHeaderY = value => {
-          setNextHeaderLayoutY(value);
-        };
-        setIsFabric(
-          !!(
-            // An internal transform mangles variables with leading "_" as private.
-            // eslint-disable-next-line dot-notation
-            ref['_internalInstanceHandle']?.stateNode?.canonical
-          ),
-        );
-      }
-    },
-  });
+  const callbackRef = (ref: Instance | null): void => {
+    if (ref == null) {
+      return;
+    }
+    ref.setNextHeaderY = value => {
+      setNextHeaderLayoutY(value);
+    };
+    // Avoid dot notation because at Meta, private properties are obfuscated.
+    // $FlowFixMe[prop-missing]
+    const _internalInstanceHandler = ref['_internalInstanceHandle']; // eslint-disable-line dot-notation
+    setIsFabric(Boolean(_internalInstanceHandler?.stateNode?.canonical));
+  };
+  const ref: (React.ElementRef<typeof Animated.View> | null) => void =
+    // $FlowFixMe[incompatible-type] - Ref is mutated by `callbackRef`.
+    useMergeRefs<Instance | null>(callbackRef, forwardedRef);
 
   const offset = useMemo(
     () =>
@@ -97,24 +94,21 @@ const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
     [scrollAnimatedValue, layoutHeight, layoutY, hiddenOnScroll],
   );
 
-  const [
-    animatedTranslateY,
-    setAnimatedTranslateY,
-  ] = React.useState<Animated.Node>(() => {
-    const inputRange: Array<number> = [-1, 0];
-    const outputRange: Array<number> = [0, 0];
-    const initialTranslateY: Animated.Interpolation = scrollAnimatedValue.interpolate(
-      {
+  const [animatedTranslateY, setAnimatedTranslateY] = useState<Animated.Node>(
+    () => {
+      const inputRange: Array<number> = [-1, 0];
+      const outputRange: Array<number> = [0, 0];
+      const initialTranslateY = scrollAnimatedValue.interpolate({
         inputRange,
         outputRange,
-      },
-    );
+      });
 
-    if (offset != null) {
-      return Animated.add(initialTranslateY, offset);
-    }
-    return initialTranslateY;
-  });
+      if (offset != null) {
+        return Animated.add(initialTranslateY, offset);
+      }
+      return initialTranslateY;
+    },
+  );
 
   const _haveReceivedInitialZeroTranslateY = useRef<boolean>(true);
   const _timer = useRef<?TimeoutID>(null);
@@ -140,7 +134,7 @@ const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
   //    platform to JS, so we need the ShadowTree to have knowledge
   //    of the current position.
   const animatedValueListener = useCallback(
-    ({value}) => {
+    ({value}: $FlowFixMe) => {
       const _debounceTimeout: number = Platform.OS === 'android' ? 15 : 64;
       // When the AnimatedInterpolation is recreated, it always initializes
       // to a value of zero and emits a value change of 0 to its listeners.
@@ -262,13 +256,13 @@ const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
     setMeasured(true);
 
     props.onLayout(event);
-    const child = React.Children.only(props.children);
+    const child = React.Children.only<$FlowFixMe>(props.children);
     if (child.props.onLayout) {
       child.props.onLayout(event);
     }
   };
 
-  const child = React.Children.only(props.children);
+  const child = React.Children.only<$FlowFixMe>(props.children);
 
   // TODO T68319535: remove this if NativeAnimated is rewritten for Fabric
   const passthroughAnimatedPropExplicitValues =
@@ -281,11 +275,11 @@ const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
   return (
     /* $FlowFixMe[prop-missing] passthroughAnimatedPropExplicitValues isn't properly
        included in the Animated.View flow type. */
-    <AnimatedView
+    <Animated.View
       collapsable={false}
       nativeID={props.nativeID}
       onLayout={_onLayout}
-      ref={_setNativeRef}
+      ref={ref}
       style={[
         child.props.style,
         styles.header,
@@ -298,7 +292,7 @@ const ScrollViewStickyHeaderWithForwardedRef: React.AbstractComponent<
         style: styles.fill, // We transfer the child style to the wrapper.
         onLayout: undefined, // we call this manually through our this._onLayout
       })}
-    </AnimatedView>
+    </Animated.View>
   );
 });
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -10,38 +10,33 @@
 
 /* eslint-env jest */
 
-const React = require('react');
+import type {ReactTestRenderer as ReactTestRendererType} from 'react-test-renderer';
 
-const ReactTestRenderer = require('react-test-renderer');
+const Switch = require('../Components/Switch/Switch').default;
+const TextInput = require('../Components/TextInput/TextInput');
+const View = require('../Components/View/View');
+const Text = require('../Text/Text');
+const {VirtualizedList} = require('@react-native/virtualized-lists');
+const React = require('react');
 const ShallowRenderer = require('react-shallow-renderer');
+const ReactTestRenderer = require('react-test-renderer');
+
 /* $FlowFixMe[not-a-function] (>=0.125.1 site=react_native_fb) This comment
  * suppresses an error found when Flow v0.125.1 was deployed. To see the error,
  * delete this comment and run Flow. */
+// $FlowFixMe[invalid-constructor]
 const shallowRenderer = new ShallowRenderer();
-
-import type {ReactTestRenderer as ReactTestRendererType} from 'react-test-renderer';
-
-// $FlowFixMe[value-as-type]
 export type ReactTestInstance = $PropertyType<ReactTestRendererType, 'root'>;
-
 export type Predicate = (node: ReactTestInstance) => boolean;
-
 type $ReturnType<Fn> = $Call<<Ret, A>((...A) => Ret) => Ret, Fn>;
-/* $FlowFixMe[prop-missing] (>=0.125.1 site=react_native_fb) This comment
- * suppresses an error found when Flow v0.125.1 was deployed. To see the error,
- * delete this comment and run Flow. */
 /* $FlowFixMe[value-as-type] (>=0.125.1 site=react_native_fb) This comment
  * suppresses an error found when Flow v0.125.1 was deployed. To see the error,
  * delete this comment and run Flow. */
-export type ReactTestRendererJSON = $ReturnType<ReactTestRenderer.create.toJSON>;
-
-const {
-  Switch,
-  Text,
-  TextInput,
-  View,
-  VirtualizedList,
-} = require('react-native');
+export type ReactTestRendererJSON =
+  /* $FlowFixMe[prop-missing] (>=0.125.1 site=react_native_fb) This comment
+   * suppresses an error found when Flow v0.125.1 was deployed. To see the error,
+   * delete this comment and run Flow. */
+  $ReturnType<ReactTestRenderer.create.toJSON>;
 
 function byClickable(): Predicate {
   return withMessage(
@@ -87,7 +82,6 @@ function enter(instance: ReactTestInstance, text: string) {
 
 // Returns null if there is no error, otherwise returns an error message string.
 function maximumDepthError(
-  // $FlowFixMe[value-as-type]
   tree: ReactTestRendererType,
   maxDepthLimit: number,
 ): ?string {
@@ -179,9 +173,10 @@ function renderAndEnforceStrictMode(element: React.Node): any {
   return renderWithStrictMode(element);
 }
 
-// $FlowFixMe[value-as-type]
 function renderWithStrictMode(element: React.Node): ReactTestRendererType {
-  const WorkAroundBugWithStrictModeInTestRenderer = prps => prps.children;
+  const WorkAroundBugWithStrictModeInTestRenderer = (prps: {
+    children: React.Node,
+  }) => prps.children;
   const StrictMode = (React: $FlowFixMe).StrictMode;
   return ReactTestRenderer.create(
     <WorkAroundBugWithStrictModeInTestRenderer>
@@ -202,10 +197,8 @@ function tap(instance: ReactTestInstance) {
   } else if (
     touchable?.props?.onStartShouldSetResponder?.testOnly_pressabilityConfig
   ) {
-    const {
-      onPress,
-      disabled,
-    } = touchable.props.onStartShouldSetResponder.testOnly_pressabilityConfig();
+    const {onPress, disabled} =
+      touchable.props.onStartShouldSetResponder.testOnly_pressabilityConfig();
     if (!disabled) {
       onPress({nativeEvent: {}});
     }

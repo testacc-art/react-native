@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -30,20 +30,23 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import androidx.annotation.Nullable;
 import androidx.appcompat.widget.AppCompatEditText;
-import androidx.core.view.AccessibilityDelegateCompat;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.facebook.common.logging.FLog;
 import com.facebook.infer.annotation.Assertions;
+import com.facebook.react.R;
 import com.facebook.react.bridge.ReactContext;
-import com.facebook.react.bridge.ReactSoftException;
+import com.facebook.react.bridge.ReactSoftExceptionLogger;
 import com.facebook.react.common.build.ReactBuildConfig;
 import com.facebook.react.uimanager.FabricViewStateManager;
+import com.facebook.react.uimanager.ReactAccessibilityDelegate;
 import com.facebook.react.uimanager.UIManagerModule;
 import com.facebook.react.uimanager.events.EventDispatcher;
 import com.facebook.react.views.text.CustomLetterSpacingSpan;
@@ -95,20 +98,20 @@ public class ReactEditText extends AppCompatEditText
   private @Nullable TextWatcherDelegator mTextWatcherDelegator;
   private int mStagedInputType;
   protected boolean mContainsImages;
-  private @Nullable Boolean mBlurOnSubmit;
+  private @Nullable String mSubmitBehavior = null;
   private boolean mDisableFullscreen;
   private @Nullable String mReturnKeyType;
   private @Nullable SelectionWatcher mSelectionWatcher;
   private @Nullable ContentSizeWatcher mContentSizeWatcher;
   private @Nullable ScrollWatcher mScrollWatcher;
-  private final InternalKeyListener mKeyListener;
+  private InternalKeyListener mKeyListener;
   private boolean mDetectScrollMovement = false;
   private boolean mOnKeyPress = false;
   private TextAttributes mTextAttributes;
   private boolean mTypefaceDirty = false;
   private @Nullable String mFontFamily = null;
-  private int mFontWeight = ReactTypefaceUtils.UNSET;
-  private int mFontStyle = ReactTypefaceUtils.UNSET;
+  private int mFontWeight = UNSET;
+  private int mFontStyle = UNSET;
   private boolean mAutoFocus = false;
   private boolean mDidAttachToWindow = false;
 
@@ -135,12 +138,13 @@ public class ReactEditText extends AppCompatEditText
     mDefaultGravityVertical = getGravity() & Gravity.VERTICAL_GRAVITY_MASK;
     mNativeEventCount = 0;
     mIsSettingTextFromJS = false;
-    mBlurOnSubmit = null;
     mDisableFullscreen = false;
     mListeners = null;
     mTextWatcherDelegator = null;
     mStagedInputType = getInputType();
-    mKeyListener = new InternalKeyListener();
+    if (mKeyListener == null) {
+      mKeyListener = new InternalKeyListener();
+    }
     mScrollWatcher = null;
     mTextAttributes = new TextAttributes();
 
@@ -153,9 +157,39 @@ public class ReactEditText extends AppCompatEditText
       setLayerType(View.LAYER_TYPE_SOFTWARE, null);
     }
 
-    ViewCompat.setAccessibilityDelegate(
-        this,
-        new AccessibilityDelegateCompat() {
+    ReactAccessibilityDelegate editTextAccessibilityDelegate =
+        new ReactAccessibilityDelegate(
+            this, this.isFocusable(), this.getImportantForAccessibility()) {
+          @Override
+          public void onInitializeAccessibilityNodeInfo(
+              View host, AccessibilityNodeInfoCompat info) {
+            super.onInitializeAccessibilityNodeInfo(host, info);
+            final String accessibilityErrorMessage =
+                (String) host.getTag(R.id.accessibility_error_message);
+            boolean contentInvalid = accessibilityErrorMessage == null ? false : true;
+            if (accessibilityErrorMessage != info.getError()) {
+              info.setError(accessibilityErrorMessage);
+              info.setContentInvalid(contentInvalid);
+            }
+          }
+
+          @Override
+          public void onInitializeAccessibilityEvent(View host, AccessibilityEvent event) {
+            super.onInitializeAccessibilityEvent(host, event);
+            if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                && host.getParent() != null) {
+              try {
+                host.getParent().requestSendAccessibilityEvent(host, event);
+              } catch (AbstractMethodError e) {
+                FLog.w(
+                    TAG,
+                    host.getParent().getClass().getSimpleName()
+                        + " does not fully implement ViewParent",
+                    e);
+              }
+            }
+          }
+
           @Override
           public boolean performAccessibilityAction(View host, int action, Bundle args) {
             if (action == AccessibilityNodeInfo.ACTION_CLICK) {
@@ -171,7 +205,8 @@ public class ReactEditText extends AppCompatEditText
             }
             return super.performAccessibilityAction(host, action, args);
           }
-        });
+        };
+    ViewCompat.setAccessibilityDelegate(this, editTextAccessibilityDelegate);
   }
 
   @Override
@@ -253,7 +288,7 @@ public class ReactEditText extends AppCompatEditText
               inputConnection, reactContext, this, mEventDispatcher);
     }
 
-    if (isMultiline() && getBlurOnSubmit()) {
+    if (isMultiline() && (shouldBlurOnReturn() || shouldSubmitOnReturn())) {
       // Remove IME_FLAG_NO_ENTER_ACTION to keep the original IME_OPTION
       outAttrs.imeOptions &= ~EditorInfo.IME_FLAG_NO_ENTER_ACTION;
     }
@@ -331,8 +366,18 @@ public class ReactEditText extends AppCompatEditText
     }
 
     if (start != UNSET && end != UNSET) {
+      // clamp selection values for safety
+      start = clampToTextLength(start);
+      end = clampToTextLength(end);
+
       setSelection(start, end);
     }
+  }
+
+  private int clampToTextLength(int value) {
+    int textLength = getText() == null ? 0 : getText().length();
+
+    return Math.max(0, Math.min(value, textLength));
   }
 
   @Override
@@ -367,21 +412,52 @@ public class ReactEditText extends AppCompatEditText
     mSelectionWatcher = selectionWatcher;
   }
 
-  public void setBlurOnSubmit(@Nullable Boolean blurOnSubmit) {
-    mBlurOnSubmit = blurOnSubmit;
-  }
-
   public void setOnKeyPress(boolean onKeyPress) {
     mOnKeyPress = onKeyPress;
   }
 
-  public boolean getBlurOnSubmit() {
-    if (mBlurOnSubmit == null) {
-      // Default blurOnSubmit
-      return isMultiline() ? false : true;
+  public boolean shouldBlurOnReturn() {
+    String submitBehavior = getSubmitBehavior();
+    boolean shouldBlur;
+
+    // Default shouldBlur
+    if (submitBehavior == null) {
+      if (!isMultiline()) {
+        shouldBlur = true;
+      } else {
+        shouldBlur = false;
+      }
+    } else {
+      shouldBlur = submitBehavior.equals("blurAndSubmit");
     }
 
-    return mBlurOnSubmit;
+    return shouldBlur;
+  }
+
+  public boolean shouldSubmitOnReturn() {
+    String submitBehavior = getSubmitBehavior();
+    boolean shouldSubmit;
+
+    // Default shouldSubmit
+    if (submitBehavior == null) {
+      if (!isMultiline()) {
+        shouldSubmit = true;
+      } else {
+        shouldSubmit = false;
+      }
+    } else {
+      shouldSubmit = submitBehavior.equals("submit") || submitBehavior.equals("blurAndSubmit");
+    }
+
+    return shouldSubmit;
+  }
+
+  public String getSubmitBehavior() {
+    return mSubmitBehavior;
+  }
+
+  public void setSubmitBehavior(String submitBehavior) {
+    mSubmitBehavior = submitBehavior;
   }
 
   public void setDisableFullscreenUI(boolean disableFullscreenUI) {
@@ -440,6 +516,10 @@ public class ReactEditText extends AppCompatEditText
     // We override the KeyListener so that all keys on the soft input keyboard as well as hardware
     // keyboards work. Some KeyListeners like DigitsKeyListener will display the keyboard but not
     // accept all input from it
+    if (mKeyListener == null) {
+      mKeyListener = new InternalKeyListener();
+    }
+
     mKeyListener.setInputType(type);
     setKeyListener(mKeyListener);
   }
@@ -492,6 +572,25 @@ public class ReactEditText extends AppCompatEditText
     return ++mNativeEventCount;
   }
 
+  /**
+   * Attempt to set an accessibility error or fail silently. EventCounter is the same one used as
+   * with text.
+   *
+   * @param eventCounter
+   * @param accessibilityErrorMessage
+   */
+  public void maybeSetAccessibilityError(
+      int eventCounter, @Nullable String accessibilityErrorMessage) {
+    String previousScreenreaderError = (String) getTag(R.id.accessibility_error_message);
+    if (!canUpdateWithEventCount(eventCounter)
+        || previousScreenreaderError == accessibilityErrorMessage) {
+      return;
+    }
+
+    setTag(R.id.accessibility_error_message, accessibilityErrorMessage);
+    sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+  }
+
   public void maybeSetTextFromJS(ReactTextUpdate reactTextUpdate) {
     mIsSettingTextFromJS = true;
     maybeSetText(reactTextUpdate);
@@ -538,6 +637,10 @@ public class ReactEditText extends AppCompatEditText
         new SpannableStringBuilder(reactTextUpdate.getText());
 
     manageSpans(spannableStringBuilder, reactTextUpdate.mContainsMultipleFragments);
+
+    // Mitigation for https://github.com/facebook/react-native/issues/35936 (S318090)
+    stripAtributeEquivalentSpans(spannableStringBuilder);
+
     mContainsImages = reactTextUpdate.containsImages();
 
     // When we update text, we trigger onChangeText code that will
@@ -608,6 +711,52 @@ public class ReactEditText extends AppCompatEditText
     // impact the whole Spannable, because that would override "local" styles per-fragment
     if (!skipAddSpansForMeasurements) {
       addSpansForMeasurement(getText());
+    }
+  }
+
+  private void stripAtributeEquivalentSpans(SpannableStringBuilder sb) {
+    // We have already set a font size on the EditText itself. We can safely remove sizing spans
+    // which are the same as the set font size, and not otherwise overlapped.
+    final int effectiveFontSize = mTextAttributes.getEffectiveFontSize();
+    ReactAbsoluteSizeSpan[] spans = sb.getSpans(0, sb.length(), ReactAbsoluteSizeSpan.class);
+
+    outerLoop:
+    for (ReactAbsoluteSizeSpan span : spans) {
+      ReactAbsoluteSizeSpan[] overlappingSpans =
+          sb.getSpans(sb.getSpanStart(span), sb.getSpanEnd(span), ReactAbsoluteSizeSpan.class);
+
+      for (ReactAbsoluteSizeSpan overlappingSpan : overlappingSpans) {
+        if (span.getSize() != effectiveFontSize) {
+          continue outerLoop;
+        }
+      }
+
+      sb.removeSpan(span);
+    }
+  }
+
+  private void unstripAttributeEquivalentSpans(
+      SpannableStringBuilder workingText, Spannable originalText) {
+    // We must add spans back for Fabric to be able to measure, at lower precedence than any
+    // existing spans. Remove all spans, add the attributes, then re-add the spans over
+    workingText.append(originalText);
+
+    for (Object span : workingText.getSpans(0, workingText.length(), Object.class)) {
+      workingText.removeSpan(span);
+    }
+
+    workingText.setSpan(
+        new ReactAbsoluteSizeSpan(mTextAttributes.getEffectiveFontSize()),
+        0,
+        workingText.length(),
+        Spanned.SPAN_INCLUSIVE_INCLUSIVE);
+
+    for (Object span : originalText.getSpans(0, originalText.length(), Object.class)) {
+      workingText.setSpan(
+          span,
+          originalText.getSpanStart(span),
+          originalText.getSpanEnd(span),
+          originalText.getSpanFlags(span));
     }
   }
 
@@ -736,13 +885,21 @@ public class ReactEditText extends AppCompatEditText
     // view, we don't need to construct one or apply it at all - it provides no use in Fabric.
     ReactContext reactContext = getReactContext(this);
 
-    if (!mFabricViewStateManager.hasStateWrapper() && !reactContext.isBridgeless()) {
+    if (mFabricViewStateManager != null
+        && !mFabricViewStateManager.hasStateWrapper()
+        && !reactContext.isBridgeless()) {
+
       final ReactTextInputLocalData localData = new ReactTextInputLocalData(this);
       UIManagerModule uiManager = reactContext.getNativeModule(UIManagerModule.class);
       if (uiManager != null) {
         uiManager.setViewLocalData(getId(), localData);
       }
     }
+  }
+
+  /* package */ int getGravityHorizontal() {
+    return getGravity()
+        & (Gravity.HORIZONTAL_GRAVITY_MASK | Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK);
   }
 
   /* package */ void setGravityHorizontal(int gravityHorizontal) {
@@ -901,6 +1058,10 @@ public class ReactEditText extends AppCompatEditText
     mReactBackgroundManager.setBorderColor(position, color, alpha);
   }
 
+  public int getBorderColor(int position) {
+    return mReactBackgroundManager.getBorderColor(position);
+  }
+
   public void setBorderRadius(float borderRadius) {
     mReactBackgroundManager.setBorderRadius(borderRadius);
   }
@@ -968,7 +1129,7 @@ public class ReactEditText extends AppCompatEditText
    */
   private void updateCachedSpannable(boolean resetStyles) {
     // Noops in non-Fabric
-    if (!mFabricViewStateManager.hasStateWrapper()) {
+    if (mFabricViewStateManager == null || !mFabricViewStateManager.hasStateWrapper()) {
       return;
     }
     // If this view doesn't have an ID yet, we don't have a cache key, so bail here
@@ -1023,9 +1184,10 @@ public class ReactEditText extends AppCompatEditText
       // ...
       // - android.app.Activity.dispatchKeyEvent (Activity.java:3447)
       try {
-        sb.append(currentText.subSequence(0, currentText.length()));
+        Spannable text = (Spannable) currentText.subSequence(0, currentText.length());
+        unstripAttributeEquivalentSpans(sb, text);
       } catch (IndexOutOfBoundsException e) {
-        ReactSoftException.logSoftException(TAG, e);
+        ReactSoftExceptionLogger.logSoftException(TAG, e);
       }
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,10 +8,12 @@
 #pragma once
 
 #include <memory>
+#include <shared_mutex>
 
 #include <react/renderer/core/LayoutConstraints.h>
 #include <react/renderer/core/LayoutContext.h>
 #include <react/renderer/core/ReactPrimitives.h>
+#include <react/utils/ContextContainer.h>
 
 namespace facebook {
 namespace react {
@@ -33,7 +35,7 @@ class UIManager;
  * ensure the logical consistency of some methods (e.g. calling `stop` for
  * non-running surface will crash).
  */
-class SurfaceHandler final {
+class SurfaceHandler {
  public:
   /*
    * Represents a status of the `SurfaceHandler` instance.
@@ -61,17 +63,23 @@ class SurfaceHandler final {
    * Can be constructed anytime with a `moduleName` and a `surfaceId`.
    */
   SurfaceHandler(std::string const &moduleName, SurfaceId surfaceId) noexcept;
-  ~SurfaceHandler() noexcept;
+  virtual ~SurfaceHandler() noexcept;
 
   /*
    * Movable-only.
    */
-  SurfaceHandler(SurfaceHandler &&SurfaceHandler) noexcept;
+  SurfaceHandler(SurfaceHandler &&other) noexcept;
   SurfaceHandler(SurfaceHandler const &SurfaceHandler) noexcept = delete;
   SurfaceHandler &operator=(SurfaceHandler &&other) noexcept;
   SurfaceHandler &operator=(SurfaceHandler const &other) noexcept = delete;
 
 #pragma mark - Surface Life-Cycle Management
+
+  /*
+   * Must be called before surface is started.
+   */
+  void setContextContainer(
+      ContextContainer::Shared contextContainer) const noexcept;
 
   /*
    * Returns a momentum value of the status.
@@ -88,10 +96,10 @@ class SurfaceHandler final {
   void stop() const noexcept;
 
   /*
-   * Sets (and gets) the runnnig mode.
+   * Sets (and gets) the running mode.
    * The running mode can be changed anytime (even for `Unregistered` surface).
    */
-  void setDisplayMode(DisplayMode displayMode) const noexcept;
+  virtual void setDisplayMode(DisplayMode displayMode) const noexcept;
   DisplayMode getDisplayMode() const noexcept;
 
 #pragma mark - Accessors
@@ -171,6 +179,7 @@ class SurfaceHandler final {
     folly::dynamic props{};
     LayoutConstraints layoutConstraints{};
     LayoutContext layoutContext{};
+    ContextContainer::Shared contextContainer{};
   };
 
   /*
@@ -187,13 +196,13 @@ class SurfaceHandler final {
   /*
    * `link_` and `linkMutex_` pair.
    */
-  mutable better::shared_mutex linkMutex_;
+  mutable std::shared_mutex linkMutex_;
   mutable Link link_;
 
   /*
    * `parameters_` and `parametersMutex_` pair.
    */
-  mutable better::shared_mutex parametersMutex_;
+  mutable std::shared_mutex parametersMutex_;
   mutable Parameters parameters_;
 };
 

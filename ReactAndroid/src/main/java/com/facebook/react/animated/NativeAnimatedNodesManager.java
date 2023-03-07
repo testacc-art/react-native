@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -17,7 +17,7 @@ import com.facebook.react.bridge.JSApplicationCausedNativeException;
 import com.facebook.react.bridge.JSApplicationIllegalArgumentException;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactNoCrashSoftException;
-import com.facebook.react.bridge.ReactSoftException;
+import com.facebook.react.bridge.ReactSoftExceptionLogger;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.UIManager;
@@ -30,11 +30,9 @@ import com.facebook.react.uimanager.events.EventDispatcher;
 import com.facebook.react.uimanager.events.EventDispatcherListener;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.Map;
 import java.util.Queue;
 
 /**
@@ -50,16 +48,16 @@ import java.util.Queue;
  *
  * <p>IMPORTANT: This class should be accessed only from the UI Thread
  */
-/*package*/ class NativeAnimatedNodesManager implements EventDispatcherListener {
+public class NativeAnimatedNodesManager implements EventDispatcherListener {
 
   private static final String TAG = "NativeAnimatedNodesManager";
 
   private final SparseArray<AnimatedNode> mAnimatedNodes = new SparseArray<>();
   private final SparseArray<AnimationDriver> mActiveAnimations = new SparseArray<>();
   private final SparseArray<AnimatedNode> mUpdatedNodes = new SparseArray<>();
-  // Mapping of a view tag and an event name to a list of event animation drivers. 99% of the time
-  // there will be only one driver per mapping so all code code should be optimized around that.
-  private final Map<String, List<EventAnimationDriver>> mEventDrivers = new HashMap<>();
+  // List of event animation drivers for an event on view.
+  // There may be multiple drivers for the same event and view.
+  private final List<EventAnimationDriver> mEventDrivers = new ArrayList<>();
   private final ReactApplicationContext mReactApplicationContext;
   private int mAnimatedGraphBFSColor = 0;
   // Used to avoid allocating a new array on every frame in `runUpdates` and `onEventDispatch`.
@@ -76,40 +74,31 @@ import java.util.Queue;
 
   /**
    * Initialize event listeners for Fabric UIManager or non-Fabric UIManager, exactly once. Once
-   * Fabric is the only UIManager, this logic can be simplified. This is only called on the JS
-   * thread.
+   * Fabric is the only UIManager, this logic can be simplified. This is expected to only be called
+   * from the native module thread.
    *
    * @param uiManagerType
    */
-  @UiThread
   public void initializeEventListenerForUIManagerType(@UIManagerType final int uiManagerType) {
-    if ((uiManagerType == UIManagerType.FABRIC && mEventListenerInitializedForFabric)
-        || (uiManagerType == UIManagerType.DEFAULT && mEventListenerInitializedForNonFabric)) {
+    if (uiManagerType == UIManagerType.FABRIC
+        ? mEventListenerInitializedForFabric
+        : mEventListenerInitializedForNonFabric) {
       return;
     }
 
-    final NativeAnimatedNodesManager self = this;
-    mReactApplicationContext.runOnUiQueueThread(
-        new Runnable() {
-          @Override
-          public void run() {
-            UIManager uiManager =
-                UIManagerHelper.getUIManager(mReactApplicationContext, uiManagerType);
-            if (uiManager != null) {
-              uiManager.<EventDispatcher>getEventDispatcher().addListener(self);
-
-              if (uiManagerType == UIManagerType.FABRIC) {
-                mEventListenerInitializedForFabric = true;
-              } else {
-                mEventListenerInitializedForNonFabric = true;
-              }
-            }
-          }
-        });
+    UIManager uiManager = UIManagerHelper.getUIManager(mReactApplicationContext, uiManagerType);
+    if (uiManager != null) {
+      uiManager.<EventDispatcher>getEventDispatcher().addListener(this);
+      if (uiManagerType == UIManagerType.FABRIC) {
+        mEventListenerInitializedForFabric = true;
+      } else {
+        mEventListenerInitializedForNonFabric = true;
+      }
+    }
   }
 
-  /*package*/ @Nullable
-  AnimatedNode getNodeById(int id) {
+  @Nullable
+  public AnimatedNode getNodeById(int id) {
     return mAnimatedNodes.get(id);
   }
 
@@ -129,6 +118,8 @@ import java.util.Queue;
       node = new StyleAnimatedNode(config, this);
     } else if ("value".equals(type)) {
       node = new ValueAnimatedNode(config);
+    } else if ("color".equals(type)) {
+      node = new ColorAnimatedNode(config, this, mReactApplicationContext);
     } else if ("props".equals(type)) {
       node = new PropsAnimatedNode(config, this);
     } else if ("interpolation".equals(type)) {
@@ -155,6 +146,21 @@ import java.util.Queue;
     node.mTag = tag;
     mAnimatedNodes.put(tag, node);
     mUpdatedNodes.put(tag, node);
+  }
+
+  @UiThread
+  public void updateAnimatedNodeConfig(int tag, ReadableMap config) {
+    AnimatedNode node = mAnimatedNodes.get(tag);
+    if (node == null) {
+      throw new JSApplicationIllegalArgumentException(
+          "updateAnimatedNode: Animated node [" + tag + "] does not exist");
+    }
+
+    if (node instanceof AnimatedNodeWithUpdateableConfig) {
+      stopAnimationsForNode(node);
+      ((AnimatedNodeWithUpdateableConfig) node).onUpdateConfig(config);
+      mUpdatedNodes.put(tag, node);
+    }
   }
 
   @UiThread
@@ -294,6 +300,15 @@ import java.util.Queue;
           WritableMap endCallbackResponse = Arguments.createMap();
           endCallbackResponse.putBoolean("finished", false);
           animation.mEndCallback.invoke(endCallbackResponse);
+        } else if (mReactApplicationContext != null) {
+          // If no callback is passed in, this /may/ be an animation set up by the single-op
+          // instruction from JS, meaning that no jsi::functions are passed into native and
+          // we communicate via RCTDeviceEventEmitter instead of callbacks.
+          WritableMap params = Arguments.createMap();
+          params.putInt("animationId", animation.mId);
+          params.putBoolean("finished", false);
+          mReactApplicationContext.emitDeviceEvent(
+              "onNativeAnimatedModuleAnimationFinished", params);
         }
         mActiveAnimations.removeAt(i);
         i--;
@@ -315,6 +330,15 @@ import java.util.Queue;
           WritableMap endCallbackResponse = Arguments.createMap();
           endCallbackResponse.putBoolean("finished", false);
           animation.mEndCallback.invoke(endCallbackResponse);
+        } else if (mReactApplicationContext != null) {
+          // If no callback is passed in, this /may/ be an animation set up by the single-op
+          // instruction from JS, meaning that no jsi::functions are passed into native and
+          // we communicate via RCTDeviceEventEmitter instead of callbacks.
+          WritableMap params = Arguments.createMap();
+          params.putInt("animationId", animation.mId);
+          params.putBoolean("finished", false);
+          mReactApplicationContext.emitDeviceEvent(
+              "onNativeAnimatedModuleAnimationFinished", params);
         }
         mActiveAnimations.removeAt(i);
         return;
@@ -391,7 +415,7 @@ import java.util.Queue;
     UIManager uiManager =
         UIManagerHelper.getUIManagerForReactTag(mReactApplicationContext, viewTag);
     if (uiManager == null) {
-      ReactSoftException.logSoftException(
+      ReactSoftExceptionLogger.logSoftException(
           TAG,
           new ReactNoCrashSoftException(
               "connectAnimatedNodeToView: Animated node could not be connected to UIManager - uiManager disappeared for tag: "
@@ -431,7 +455,23 @@ import java.util.Queue;
       throw new JSApplicationIllegalArgumentException(
           "getValue: Animated node with tag [" + tag + "] does not exist or is not a 'value' node");
     }
-    callback.invoke(((ValueAnimatedNode) node).getValue());
+    double value = ((ValueAnimatedNode) node).getValue();
+    if (callback != null) {
+      callback.invoke(value);
+      return;
+    }
+
+    // If there's no callback, that means that JS is using the single-operation mode, and not
+    // passing any callbacks into Java.
+    // See NativeAnimatedHelper.js for details.
+    // Instead, we use RCTDeviceEventEmitter to pass data back to JS and emulate callbacks.
+    if (mReactApplicationContext == null) {
+      return;
+    }
+    WritableMap params = Arguments.createMap();
+    params.putInt("tag", tag);
+    params.putDouble("value", value);
+    mReactApplicationContext.emitDeviceEvent("onNativeAnimatedModuleGetValue", params);
   }
 
   @UiThread
@@ -454,7 +494,8 @@ import java.util.Queue;
   }
 
   @UiThread
-  public void addAnimatedEventToView(int viewTag, String eventName, ReadableMap eventMapping) {
+  public void addAnimatedEventToView(
+      int viewTag, String eventHandlerName, ReadableMap eventMapping) {
     int nodeTag = eventMapping.getInt("animatedValueTag");
     AnimatedNode node = mAnimatedNodes.get(nodeTag);
     if (node == null) {
@@ -465,8 +506,8 @@ import java.util.Queue;
       throw new JSApplicationIllegalArgumentException(
           "addAnimatedEventToView: Animated node on view ["
               + viewTag
-              + "] connected to event ("
-              + eventName
+              + "] connected to event handler ("
+              + eventHandlerName
               + ") should be of type "
               + ValueAnimatedNode.class.getName());
     }
@@ -477,37 +518,31 @@ import java.util.Queue;
       pathList.add(path.getString(i));
     }
 
-    EventAnimationDriver event = new EventAnimationDriver(pathList, (ValueAnimatedNode) node);
-    String key = viewTag + eventName;
-    if (mEventDrivers.containsKey(key)) {
-      mEventDrivers.get(key).add(event);
-    } else {
-      List<EventAnimationDriver> drivers = new ArrayList<>(1);
-      drivers.add(event);
-      mEventDrivers.put(key, drivers);
-    }
+    String eventName = normalizeEventName(eventHandlerName);
+
+    EventAnimationDriver eventDriver =
+        new EventAnimationDriver(eventName, viewTag, pathList, (ValueAnimatedNode) node);
+    mEventDrivers.add(eventDriver);
   }
 
   @UiThread
-  public void removeAnimatedEventFromView(int viewTag, String eventName, int animatedValueTag) {
-    String key = viewTag + eventName;
-    if (mEventDrivers.containsKey(key)) {
-      List<EventAnimationDriver> driversForKey = mEventDrivers.get(key);
-      if (driversForKey.size() == 1) {
-        mEventDrivers.remove(viewTag + eventName);
-      } else {
-        ListIterator<EventAnimationDriver> it = driversForKey.listIterator();
-        while (it.hasNext()) {
-          if (it.next().mValueNode.mTag == animatedValueTag) {
-            it.remove();
-            break;
-          }
-        }
+  public void removeAnimatedEventFromView(
+      int viewTag, String eventHandlerName, int animatedValueTag) {
+
+    String eventName = normalizeEventName(eventHandlerName);
+
+    ListIterator<EventAnimationDriver> it = mEventDrivers.listIterator();
+    while (it.hasNext()) {
+      EventAnimationDriver driver = it.next();
+      if (eventName.equals(driver.mEventName)
+          && viewTag == driver.mViewTag
+          && animatedValueTag == driver.mValueNode.mTag) {
+        it.remove();
+        break;
       }
     }
   }
 
-  @UiThread
   @Override
   public void onEventDispatch(final Event event) {
     // Events can be dispatched from any thread so we have to make sure handleEvent is run from the
@@ -539,18 +574,19 @@ import java.util.Queue;
       if (uiManager == null) {
         return;
       }
-      String eventName = uiManager.resolveCustomDirectEventName(event.getEventName());
-      if (eventName == null) {
-        eventName = "";
-      }
 
-      List<EventAnimationDriver> driversForKey = mEventDrivers.get(event.getViewTag() + eventName);
-      if (driversForKey != null) {
-        for (EventAnimationDriver driver : driversForKey) {
+      boolean foundAtLeastOneDriver = false;
+      Event.EventAnimationDriverMatchSpec matchSpec = event.getEventAnimationDriverMatchSpec();
+      for (EventAnimationDriver driver : mEventDrivers) {
+        if (matchSpec.match(driver.mViewTag, driver.mEventName)) {
+          foundAtLeastOneDriver = true;
           stopAnimationsForNode(driver.mValueNode);
           event.dispatch(driver);
           mRunUpdateNodeList.add(driver.mValueNode);
         }
+      }
+
+      if (foundAtLeastOneDriver) {
         updateNodes(mRunUpdateNodeList);
         mRunUpdateNodeList.clear();
       }
@@ -605,6 +641,15 @@ import java.util.Queue;
             WritableMap endCallbackResponse = Arguments.createMap();
             endCallbackResponse.putBoolean("finished", true);
             animation.mEndCallback.invoke(endCallbackResponse);
+          } else if (mReactApplicationContext != null) {
+            // If no callback is passed in, this /may/ be an animation set up by the single-op
+            // instruction from JS, meaning that no jsi::functions are passed into native and
+            // we communicate via RCTDeviceEventEmitter instead of callbacks.
+            WritableMap params = Arguments.createMap();
+            params.putInt("animationId", animation.mId);
+            params.putBoolean("finished", true);
+            mReactApplicationContext.emitDeviceEvent(
+                "onNativeAnimatedModuleAnimationFinished", params);
           }
           mActiveAnimations.removeAt(i);
         }
@@ -753,16 +798,26 @@ import java.util.Queue;
       if (mEventListenerInitializedForFabric && cyclesDetected == 0) {
         // TODO T71377544: investigate these SoftExceptions and see if we can remove entirely
         // or fix the root cause
-        ReactSoftException.logSoftException(TAG, new ReactNoCrashSoftException(ex));
+        ReactSoftExceptionLogger.logSoftException(TAG, new ReactNoCrashSoftException(ex));
       } else if (mEventListenerInitializedForFabric) {
         // TODO T71377544: investigate these SoftExceptions and see if we can remove entirely
         // or fix the root cause
-        ReactSoftException.logSoftException(TAG, new ReactNoCrashSoftException(ex));
+        ReactSoftExceptionLogger.logSoftException(TAG, new ReactNoCrashSoftException(ex));
       } else {
         throw ex;
       }
     } else {
       mWarnedAboutGraphTraversal = false;
     }
+  }
+
+  private String normalizeEventName(String eventHandlerName) {
+    // Fabric UIManager also makes this assumption
+    String eventName = eventHandlerName;
+    if (eventHandlerName.startsWith("on")) {
+      eventName = "top" + eventHandlerName.substring(2);
+    }
+
+    return eventName;
   }
 }

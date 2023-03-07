@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -21,7 +21,7 @@ import TextLegend from '../../components/TextLegend';
 const {LayoutAnimation, StyleSheet, Text, View} = require('react-native');
 
 class Entity extends React.Component<{|children: React.Node|}> {
-  render() {
+  render(): React.Node {
     return (
       <Text style={{fontWeight: 'bold', color: '#527fe4'}}>
         {this.props.children}
@@ -30,7 +30,10 @@ class Entity extends React.Component<{|children: React.Node|}> {
   }
 }
 class AttributeToggler extends React.Component<{...}, $FlowFixMeState> {
-  state = {fontWeight: 'bold', fontSize: 15};
+  state: {fontSize: number, fontWeight: 'bold' | 'normal'} = {
+    fontWeight: 'bold',
+    fontSize: 15,
+  };
 
   toggleWeight = () => {
     this.setState({
@@ -44,7 +47,7 @@ class AttributeToggler extends React.Component<{...}, $FlowFixMeState> {
     });
   };
 
-  render() {
+  render(): React.Node {
     const curStyle = {
       fontWeight: this.state.fontWeight,
       fontSize: this.state.fontSize,
@@ -83,7 +86,7 @@ class AdjustingFontSize extends React.Component<
   AdjustingFontSizeProps,
   AdjustingFontSizeState,
 > {
-  state = {
+  state: AdjustingFontSizeState = {
     dynamicText: '',
     shouldRender: true,
   };
@@ -119,7 +122,7 @@ class AdjustingFontSize extends React.Component<
     });
   };
 
-  render() {
+  render(): React.Node {
     if (!this.state.shouldRender) {
       return <View />;
     }
@@ -216,23 +219,15 @@ class TextExample extends React.Component<{...}> {
         <RNTesterBlock title="Hyphenation">
           <Text android_hyphenationFrequency="normal">
             <Text style={{color: 'red'}}>Normal: </Text>
-            WillHaveAnHyphenWhenBreakingForNewLine
+            WillHaveAHyphenWhenBreakingForNewLine
           </Text>
           <Text android_hyphenationFrequency="none">
             <Text style={{color: 'red'}}>None: </Text>
-            WillNotHaveAnHyphenWhenBreakingForNewLine
+            WillNotHaveAHyphenWhenBreakingForNewLine
           </Text>
           <Text android_hyphenationFrequency="full">
             <Text style={{color: 'red'}}>Full: </Text>
-            WillHaveAnHyphenWhenBreakingForNewLine
-          </Text>
-          <Text android_hyphenationFrequency="high">
-            <Text style={{color: 'red'}}>High: </Text>
-            WillHaveAnHyphenWhenBreakingForNewLine
-          </Text>
-          <Text android_hyphenationFrequency="balanced">
-            <Text style={{color: 'red'}}>Balanced: </Text>
-            WillHaveAnHyphenWhenBreakingForNewLine
+            WillHaveAHyphenWhenBreakingForNewLine
           </Text>
         </RNTesterBlock>
         <RNTesterBlock title="Padding">
@@ -255,6 +250,9 @@ class TextExample extends React.Component<{...}> {
           <Text style={{fontFamily: 'monospace'}}>Monospace</Text>
           <Text style={{fontFamily: 'monospace', fontWeight: 'bold'}}>
             Monospace Bold (After 5.0)
+          </Text>
+          <Text style={{fontFamily: 'Unknown Font Family'}}>
+            Unknown Font Family
           </Text>
         </RNTesterBlock>
         <RNTesterBlock title="Android Material Design fonts">
@@ -397,6 +395,15 @@ class TextExample extends React.Component<{...}> {
           <Text style={{fontWeight: '300'}}>FONT WEIGHT 300</Text>
           <Text style={{fontWeight: '200'}}>FONT WEIGHT 200</Text>
           <Text style={{fontWeight: '100'}}>FONT WEIGHT 100</Text>
+          <Text style={{fontWeight: 900}}>FONT WEIGHT 900</Text>
+          <Text style={{fontWeight: 800}}>FONT WEIGHT 800</Text>
+          <Text style={{fontWeight: 700}}>FONT WEIGHT 700</Text>
+          <Text style={{fontWeight: 600}}>FONT WEIGHT 600</Text>
+          <Text style={{fontWeight: 500}}>FONT WEIGHT 500</Text>
+          <Text style={{fontWeight: 400}}>FONT WEIGHT 400</Text>
+          <Text style={{fontWeight: 300}}>FONT WEIGHT 300</Text>
+          <Text style={{fontWeight: 200}}>FONT WEIGHT 200</Text>
+          <Text style={{fontWeight: 100}}>FONT WEIGHT 100</Text>
         </RNTesterBlock>
         <RNTesterBlock title="Font Style">
           <Text style={{fontStyle: 'italic'}}>Move fast and be italic</Text>
@@ -507,6 +514,16 @@ class TextExample extends React.Component<{...}> {
           </Text>
           <Text style={{fontSize: 12}}>
             <Entity>Entity Name</Entity>
+          </Text>
+          <Text style={{fontSize: 8}}>
+            Nested text with size 8,{' '}
+            <Text style={{fontSize: 23}}>size 23, </Text>
+            and size 8 again
+          </Text>
+          <Text style={{color: 'red'}}>
+            Nested text with red color,{' '}
+            <Text style={{color: 'blue'}}>blue color, </Text>
+            and red color again
           </Text>
         </RNTesterBlock>
         <RNTesterBlock title="Text Align">
@@ -806,6 +823,18 @@ class TextExample extends React.Component<{...}> {
           <Text style={{textTransform: 'capitalize'}}>
             This text should be CAPITALIZED.
           </Text>
+          <Text>
+            Capitalize a date:
+            <Text style={{textTransform: 'capitalize'}}>
+              the 9th of november, 1998
+            </Text>
+          </Text>
+          <Text>
+            Capitalize a 2 digit date:
+            <Text style={{textTransform: 'capitalize'}}>
+              the 25th of december
+            </Text>
+          </Text>
           <Text style={{textTransform: 'capitalize'}}>
             Mixed: <Text style={{textTransform: 'uppercase'}}>uppercase </Text>
             <Text style={{textTransform: 'lowercase'}}>LoWeRcAsE </Text>
@@ -892,6 +921,62 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
 });
+
+function TextBaseLineLayoutExample(props: {}): React.Node {
+  const texts = [];
+  for (let i = 9; i >= 0; i--) {
+    texts.push(
+      <Text
+        key={i}
+        style={{fontSize: 8 + i * 5, maxWidth: 20, backgroundColor: '#eee'}}>
+        {i}
+      </Text>,
+    );
+  }
+
+  const marker = (
+    <View style={{width: 20, height: 20, backgroundColor: 'gray'}} />
+  );
+  const subtitleStyle = {fontSize: 16, marginTop: 8, fontWeight: 'bold'};
+
+  return (
+    <View>
+      <Text style={subtitleStyle}>{'Nested <Text/>s:'}</Text>
+      <View style={{flexDirection: 'row', alignItems: 'baseline'}}>
+        {marker}
+        <Text>{texts}</Text>
+        {marker}
+      </View>
+
+      <Text style={subtitleStyle}>{'Array of <Text/>s in <View>:'}</Text>
+      <View style={{flexDirection: 'row', alignItems: 'baseline'}}>
+        {marker}
+        {texts}
+        {marker}
+      </View>
+
+      <Text style={subtitleStyle}>{'Interleaving <View> and <Text>:'}</Text>
+      <View style={{flexDirection: 'row', alignItems: 'baseline'}}>
+        {marker}
+        <Text selectable={true}>
+          Some text.
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'baseline',
+              backgroundColor: '#eee',
+            }}>
+            {marker}
+            <Text>Text inside View.</Text>
+            {marker}
+          </View>
+        </Text>
+        {marker}
+      </View>
+    </View>
+  );
+}
+
 exports.title = 'Text';
 exports.documentationURL = 'https://reactnative.dev/docs/text';
 exports.category = 'Basic';
@@ -899,8 +984,46 @@ exports.description = 'Base component for rendering styled text.';
 exports.examples = [
   {
     title: 'Basic text',
-    render: function(): React.Element<typeof TextExample> {
+    render: function (): React.Element<typeof TextExample> {
       return <TextExample />;
+    },
+  },
+  {
+    title: "Text `alignItems: 'baseline'` style",
+    render: function (): React.Node {
+      return <TextBaseLineLayoutExample />;
+    },
+  },
+  {
+    title: 'Selectable Text',
+    render: function (): React.Node {
+      return (
+        <View>
+          <Text style={{userSelect: 'auto'}}>Text element is selectable</Text>
+        </View>
+      );
+    },
+  },
+  {
+    title: 'Text alignment',
+    render: function (): React.Node {
+      return (
+        <View>
+          <Text style={{textAlignVertical: 'top', borderWidth: 1, height: 75}}>
+            Text element aligned to the top via textAlignVertical
+          </Text>
+          <Text style={{verticalAlign: 'top', borderWidth: 1, height: 75}}>
+            Text element aligned to the top via verticalAlign
+          </Text>
+          <Text
+            style={{textAlignVertical: 'center', borderWidth: 1, height: 75}}>
+            Text element aligned to the middle via textAlignVertical
+          </Text>
+          <Text style={{verticalAlign: 'middle', borderWidth: 1, height: 75}}>
+            Text element aligned to the middle via verticalAlign
+          </Text>
+        </View>
+      );
     },
   },
 ];

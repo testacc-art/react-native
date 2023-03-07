@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -526,6 +526,36 @@ const INSETS_PROP: SchemaType = {
   },
 };
 
+const DIMENSION_PROP: SchemaType = {
+  modules: {
+    CustomView: {
+      type: 'Component',
+      components: {
+        DimensionPropNativeComponent: {
+          extendsProps: [
+            {
+              type: 'ReactNativeBuiltInType',
+              knownTypeName: 'ReactNativeCoreViewProps',
+            },
+          ],
+          events: [],
+          props: [
+            {
+              name: 'marginBack',
+              optional: true,
+              typeAnnotation: {
+                type: 'ReservedPropTypeAnnotation',
+                name: 'DimensionPrimitive',
+              },
+            },
+          ],
+          commands: [],
+        },
+      },
+    },
+  },
+};
+
 const ARRAY_PROPS: SchemaType = {
   modules: {
     Slider: {
@@ -610,6 +640,17 @@ const ARRAY_PROPS: SchemaType = {
                 elementType: {
                   type: 'ReservedPropTypeAnnotation',
                   name: 'PointPrimitive',
+                },
+              },
+            },
+            {
+              name: 'dimensions',
+              optional: true,
+              typeAnnotation: {
+                type: 'ArrayTypeAnnotation',
+                elementType: {
+                  type: 'ReservedPropTypeAnnotation',
+                  name: 'DimensionPrimitive',
                 },
               },
             },
@@ -1594,6 +1635,53 @@ const EXCLUDE_ANDROID_IOS: SchemaType = {
   },
 };
 
+const EXCLUDE_IOS_TWO_COMPONENTS_DIFFERENT_FILES: SchemaType = {
+  modules: {
+    ComponentFile1: {
+      type: 'Component',
+      components: {
+        ExcludedIosComponent: {
+          excludedPlatforms: ['iOS'],
+          extendsProps: [
+            {
+              type: 'ReactNativeBuiltInType',
+              knownTypeName: 'ReactNativeCoreViewProps',
+            },
+          ],
+          events: [],
+          props: [],
+          commands: [],
+        },
+      },
+    },
+    ComponentFile2: {
+      type: 'Component',
+      components: {
+        MultiFileIncludedNativeComponent: {
+          extendsProps: [
+            {
+              type: 'ReactNativeBuiltInType',
+              knownTypeName: 'ReactNativeCoreViewProps',
+            },
+          ],
+          events: [],
+          props: [
+            {
+              name: 'disabled',
+              optional: true,
+              typeAnnotation: {
+                type: 'BooleanTypeAnnotation',
+                default: true,
+              },
+            },
+          ],
+          commands: [],
+        },
+      },
+    },
+  },
+};
+
 module.exports = {
   NO_PROPS_NO_EVENTS,
   INTERFACE_ONLY,
@@ -1606,6 +1694,7 @@ module.exports = {
   IMAGE_PROP,
   POINT_PROP,
   INSETS_PROP,
+  DIMENSION_PROP,
   ARRAY_PROPS,
   ARRAY_PROPS_WITH_NESTED_OBJECT,
   OBJECT_PROPS,
@@ -1621,4 +1710,5 @@ module.exports = {
   COMMANDS_AND_PROPS,
   EXCLUDE_ANDROID,
   EXCLUDE_ANDROID_IOS,
+  EXCLUDE_IOS_TWO_COMPONENTS_DIFFERENT_FILES,
 };

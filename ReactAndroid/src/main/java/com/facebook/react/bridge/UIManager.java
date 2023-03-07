@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,7 +14,6 @@ import androidx.annotation.AnyThread;
 import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
 import com.facebook.infer.annotation.ThreadConfined;
-import java.util.List;
 
 public interface UIManager extends JSIModule, PerformanceCounter {
 
@@ -118,6 +117,16 @@ public interface UIManager extends JSIModule, PerformanceCounter {
   void removeUIManagerEventListener(UIManagerListener listener);
 
   /**
+   * Resolves a view based on its reactTag. Do not mutate properties on this view that are already
+   * managed by React, as there are no guarantees this changes will be preserved.
+   *
+   * @throws IllegalViewOperationException if tag could not be resolved.
+   * @param reactTag tag
+   * @return view if found
+   */
+  View resolveView(int reactTag);
+
+  /**
    * This method dispatches events from RN Android code to JS. The delivery of this event will not
    * be queued in EventDispatcher class.
    *
@@ -143,15 +152,4 @@ public interface UIManager extends JSIModule, PerformanceCounter {
   @Deprecated
   @Nullable
   String resolveCustomDirectEventName(@Nullable String eventName);
-
-  /**
-   * Helper method to pre-initialize view managers. When using Native ViewConfigs this method will
-   * also pre-compute the constants for a view manager. The purpose is to ensure that we don't block
-   * for getting the constants for view managers during initial rendering of a surface.
-   *
-   * @deprecated this method will be removed in the future
-   * @param viewManagerNames {@link List <String>} names of ViewManagers
-   */
-  @Deprecated
-  void preInitializeViewManagers(List<String> viewManagerNames);
 }

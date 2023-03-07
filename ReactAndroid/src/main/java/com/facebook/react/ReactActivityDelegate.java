@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,9 +11,11 @@ import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.facebook.infer.annotation.Assertions;
 import com.facebook.react.bridge.Callback;
@@ -44,8 +46,25 @@ public class ReactActivityDelegate {
     mMainComponentName = mainComponentName;
   }
 
+  /**
+   * Public API to populate the launch options that will be passed to React. Here you can customize
+   * the values that will be passed as `initialProperties` to the Renderer.
+   *
+   * @return Either null or a key-value map as a Bundle
+   */
   protected @Nullable Bundle getLaunchOptions() {
     return null;
+  }
+
+  private @NonNull Bundle composeLaunchOptions() {
+    Bundle composedLaunchOptions = getLaunchOptions();
+    if (isFabricEnabled()) {
+      if (composedLaunchOptions == null) {
+        composedLaunchOptions = new Bundle();
+      }
+      composedLaunchOptions.putBoolean("concurrentRoot", true);
+    }
+    return composedLaunchOptions;
   }
 
   protected ReactRootView createRootView() {
@@ -73,15 +92,16 @@ public class ReactActivityDelegate {
 
   protected void onCreate(Bundle savedInstanceState) {
     String mainComponentName = getMainComponentName();
+    Bundle launchOptions = composeLaunchOptions();
     mReactDelegate =
         new ReactDelegate(
-            getPlainActivity(), getReactNativeHost(), mainComponentName, getLaunchOptions()) {
+            getPlainActivity(), getReactNativeHost(), mainComponentName, launchOptions) {
           @Override
           protected ReactRootView createRootView() {
             return ReactActivityDelegate.this.createRootView();
           }
         };
-    if (mMainComponentName != null) {
+    if (mainComponentName != null) {
       loadApp(mainComponentName);
     }
   }
@@ -154,6 +174,12 @@ public class ReactActivityDelegate {
     }
   }
 
+  public void onConfigurationChanged(Configuration newConfig) {
+    if (getReactNativeHost().hasInstance()) {
+      getReactInstanceManager().onConfigurationChanged(getContext(), newConfig);
+    }
+  }
+
   @TargetApi(Build.VERSION_CODES.M)
   public void requestPermissions(
       String[] permissions, int requestCode, PermissionListener listener) {
@@ -182,5 +208,15 @@ public class ReactActivityDelegate {
 
   protected Activity getPlainActivity() {
     return ((Activity) getContext());
+  }
+
+  /**
+   * Override this method if you wish to selectively toggle Fabric for a specific surface. This will
+   * also control if Concurrent Root (React 18) should be enabled or not.
+   *
+   * @return true if Fabric is enabled for this Activity, false otherwise.
+   */
+  protected boolean isFabricEnabled() {
+    return false;
   }
 }

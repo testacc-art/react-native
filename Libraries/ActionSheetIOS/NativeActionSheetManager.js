@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,6 +9,7 @@
  */
 
 import type {TurboModule} from '../TurboModule/RCTExport';
+
 import * as TurboModuleRegistry from '../TurboModule/TurboModuleRegistry';
 
 export interface Spec extends TurboModule {
@@ -22,6 +23,7 @@ export interface Spec extends TurboModule {
       +cancelButtonIndex?: ?number,
       +anchor?: ?number,
       +tintColor?: ?number,
+      +cancelButtonTintColor?: ?number,
       +userInterfaceStyle?: ?string,
       +disabledButtonIndices?: Array<number>,
     |},
@@ -34,6 +36,7 @@ export interface Spec extends TurboModule {
       +subject?: ?string,
       +anchor?: ?number,
       +tintColor?: ?number,
+      +cancelButtonTintColor?: ?number,
       +excludedActivityTypes?: ?Array<string>,
       +userInterfaceStyle?: ?string,
     |},
@@ -45,6 +48,7 @@ export interface Spec extends TurboModule {
     |}) => void,
     successCallback: (completed: boolean, activityType: ?string) => void,
   ) => void;
+  +dismissActionSheet?: () => void;
 }
 
 export default (TurboModuleRegistry.get<Spec>('ActionSheetManager'): ?Spec);

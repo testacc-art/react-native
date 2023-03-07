@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,24 +7,39 @@
 
 #import "RCTMountingManager.h"
 
-#import <better/map.h>
+#import <QuartzCore/QuartzCore.h>
+#import <butter/map.h>
 
 #import <React/RCTAssert.h>
+#import <React/RCTComponent.h>
 #import <React/RCTFollyConvert.h>
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
+#import <react/config/ReactNativeConfig.h>
 #import <react/renderer/components/root/RootShadowNode.h>
 #import <react/renderer/core/LayoutableShadowNode.h>
 #import <react/renderer/core/RawProps.h>
 #import <react/renderer/debug/SystraceSection.h>
 #import <react/renderer/mounting/TelemetryController.h>
 
-#import "RCTComponentViewProtocol.h"
-#import "RCTComponentViewRegistry.h"
-#import "RCTConversions.h"
-#import "RCTMountingTransactionObserverCoordinator.h"
+#import <React/RCTComponentViewProtocol.h>
+#import <React/RCTComponentViewRegistry.h>
+#import <React/RCTConversions.h>
+#import <React/RCTMountingTransactionObserverCoordinator.h>
 
 using namespace facebook::react;
+
+static SurfaceId RCTSurfaceIdForView(UIView *view)
+{
+  do {
+    if (RCTIsReactRootView(@(view.tag))) {
+      return view.tag;
+    }
+    view = view.superview;
+  } while (view != nil);
+
+  return -1;
+}
 
 static void RCTPerformMountInstructions(
     ShadowViewMutationList const &mutations,
@@ -90,6 +105,11 @@ static void RCTPerformMountInstructions(
         break;
       }
 
+      case ShadowViewMutation::RemoveDeleteTree: {
+        // TODO - not supported yet
+        break;
+      }
+
       case ShadowViewMutation::Update: {
         auto &oldChildShadowView = mutation.oldChildShadowView;
         auto &newChildShadowView = mutation.newChildShadowView;
@@ -136,15 +156,21 @@ static void RCTPerformMountInstructions(
   RCTMountingTransactionObserverCoordinator _observerCoordinator;
   BOOL _transactionInFlight;
   BOOL _followUpTransactionRequired;
+  ContextContainer::Shared _contextContainer;
 }
 
 - (instancetype)init
 {
   if (self = [super init]) {
-    _componentViewRegistry = [[RCTComponentViewRegistry alloc] init];
+    _componentViewRegistry = [RCTComponentViewRegistry new];
   }
 
   return self;
+}
+
+- (void)setContextContainer:(ContextContainer::Shared)contextContainer
+{
+  _contextContainer = contextContainer;
 }
 
 - (void)attachSurfaceToView:(UIView *)view surfaceId:(SurfaceId)surfaceId
@@ -170,21 +196,20 @@ static void RCTPerformMountInstructions(
                                           componentViewDescriptor:rootViewDescriptor];
 }
 
-- (void)scheduleTransaction:(MountingCoordinator::Shared const &)mountingCoordinator
+- (void)scheduleTransaction:(MountingCoordinator::Shared)mountingCoordinator
 {
   if (RCTIsMainQueue()) {
     // Already on the proper thread, so:
     // * No need to do a thread jump;
     // * No need to do expensive copy of all mutations;
     // * No need to allocate a block.
-    [self initiateTransaction:mountingCoordinator];
+    [self initiateTransaction:*mountingCoordinator];
     return;
   }
 
-  auto mountingCoordinatorCopy = mountingCoordinator;
   RCTExecuteOnMainQueue(^{
     RCTAssertMainQueue();
-    [self initiateTransaction:mountingCoordinatorCopy];
+    [self initiateTransaction:*mountingCoordinator];
   });
 }
 
@@ -199,7 +224,6 @@ static void RCTPerformMountInstructions(
   }
 
   RCTExecuteOnMainQueue(^{
-    RCTAssertMainQueue();
     [self synchronouslyDispatchCommandOnUIThread:reactTag commandName:commandName args:args];
   });
 }
@@ -215,12 +239,11 @@ static void RCTPerformMountInstructions(
   }
 
   RCTExecuteOnMainQueue(^{
-    RCTAssertMainQueue();
     [self synchronouslyDispatchAccessbilityEventOnUIThread:reactTag eventType:eventType];
   });
 }
 
-- (void)initiateTransaction:(MountingCoordinator::Shared const &)mountingCoordinator
+- (void)initiateTransaction:(MountingCoordinator const &)mountingCoordinator
 {
   SystraceSection s("-[RCTMountingManager initiateTransaction:]");
   RCTAssertMainQueue();
@@ -238,34 +261,35 @@ static void RCTPerformMountInstructions(
   } while (_followUpTransactionRequired);
 }
 
-- (void)performTransaction:(MountingCoordinator::Shared const &)mountingCoordinator
+- (void)performTransaction:(MountingCoordinator const &)mountingCoordinator
 {
   SystraceSection s("-[RCTMountingManager performTransaction:]");
   RCTAssertMainQueue();
 
-  auto surfaceId = mountingCoordinator->getSurfaceId();
+  auto surfaceId = mountingCoordinator.getSurfaceId();
 
-  mountingCoordinator->getTelemetryController().pullTransaction(
-      [&](MountingTransactionMetadata metadata) {
+  mountingCoordinator.getTelemetryController().pullTransaction(
+      [&](MountingTransaction const &transaction, SurfaceTelemetry const &surfaceTelemetry) {
         [self.delegate mountingManager:self willMountComponentsWithRootTag:surfaceId];
-        _observerCoordinator.notifyObserversMountingTransactionWillMount(metadata);
+        _observerCoordinator.notifyObserversMountingTransactionWillMount(transaction, surfaceTelemetry);
       },
-      [&](ShadowViewMutationList const &mutations) {
-        RCTPerformMountInstructions(mutations, _componentViewRegistry, _observerCoordinator, surfaceId);
+      [&](MountingTransaction const &transaction, SurfaceTelemetry const &surfaceTelemetry) {
+        RCTPerformMountInstructions(
+            transaction.getMutations(), _componentViewRegistry, _observerCoordinator, surfaceId);
       },
-      [&](MountingTransactionMetadata metadata) {
-        _observerCoordinator.notifyObserversMountingTransactionDidMount(metadata);
+      [&](MountingTransaction const &transaction, SurfaceTelemetry const &surfaceTelemetry) {
+        _observerCoordinator.notifyObserversMountingTransactionDidMount(transaction, surfaceTelemetry);
         [self.delegate mountingManager:self didMountComponentsWithRootTag:surfaceId];
       });
 }
 
 - (void)setIsJSResponder:(BOOL)isJSResponder
     blockNativeResponder:(BOOL)blockNativeResponder
-           forShadowView:(facebook::react::ShadowView)shadowView
+           forShadowView:(facebook::react::ShadowView const &)shadowView
 {
+  ReactTag reactTag = shadowView.tag;
   RCTExecuteOnMainQueue(^{
-    UIView<RCTComponentViewProtocol> *componentView =
-        [self->_componentViewRegistry findComponentViewWithTag:shadowView.tag];
+    UIView<RCTComponentViewProtocol> *componentView = [self->_componentViewRegistry findComponentViewWithTag:reactTag];
     [componentView setIsJSResponder:isJSResponder];
   });
 }
@@ -276,8 +300,10 @@ static void RCTPerformMountInstructions(
 {
   RCTAssertMainQueue();
   UIView<RCTComponentViewProtocol> *componentView = [_componentViewRegistry findComponentViewWithTag:reactTag];
-  SharedProps oldProps = [componentView props];
-  SharedProps newProps = componentDescriptor.cloneProps(oldProps, RawProps(convertIdToFollyDynamic(props)));
+  SurfaceId surfaceId = RCTSurfaceIdForView(componentView);
+  Props::Shared oldProps = [componentView props];
+  Props::Shared newProps = componentDescriptor.cloneProps(
+      PropsParserContext{surfaceId, *_contextContainer.get()}, oldProps, RawProps(convertIdToFollyDynamic(props)));
 
   NSSet<NSString *> *propKeys = componentView.propKeysManagedByAnimated_DO_NOT_USE_THIS_IS_BROKEN ?: [NSSet new];
   propKeys = [propKeys setByAddingObjectsFromArray:props.allKeys];
@@ -290,13 +316,13 @@ static void RCTPerformMountInstructions(
   if (props[@"transform"] &&
       !CATransform3DEqualToTransform(
           RCTCATransform3DFromTransformMatrix(newViewProps.transform), componentView.layer.transform)) {
-    RCTLogWarn(@"transform was not applied during [RCTViewComponentView updateProps:oldProps:]");
     componentView.layer.transform = RCTCATransform3DFromTransformMatrix(newViewProps.transform);
   }
   if (props[@"opacity"] && componentView.layer.opacity != (float)newViewProps.opacity) {
-    RCTLogWarn(@"opacity was not applied during [RCTViewComponentView updateProps:oldProps:]");
     componentView.layer.opacity = newViewProps.opacity;
   }
+
+  [componentView finalizeUpdates:RNComponentViewUpdateMaskProps];
 }
 
 - (void)synchronouslyDispatchCommandOnUIThread:(ReactTag)reactTag

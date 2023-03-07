@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,11 +8,10 @@
 #include "SurfaceHandler.h"
 
 #include <react/debug/react_native_assert.h>
-#include <react/renderer/scheduler/Scheduler.h>
+#include <react/renderer/debug/SystraceSection.h>
 #include <react/renderer/uimanager/UIManager.h>
 
-namespace facebook {
-namespace react {
+namespace facebook::react {
 
 using Status = SurfaceHandler::Status;
 
@@ -28,13 +27,10 @@ SurfaceHandler::SurfaceHandler(SurfaceHandler &&other) noexcept {
 }
 
 SurfaceHandler &SurfaceHandler::operator=(SurfaceHandler &&other) noexcept {
-  std::unique_lock<better::shared_mutex> lock1(linkMutex_, std::defer_lock);
-  std::unique_lock<better::shared_mutex> lock2(
-      parametersMutex_, std::defer_lock);
-  std::unique_lock<better::shared_mutex> lock3(
-      other.linkMutex_, std::defer_lock);
-  std::unique_lock<better::shared_mutex> lock4(
-      other.parametersMutex_, std::defer_lock);
+  std::unique_lock lock1(linkMutex_, std::defer_lock);
+  std::unique_lock lock2(parametersMutex_, std::defer_lock);
+  std::unique_lock lock3(other.linkMutex_, std::defer_lock);
+  std::unique_lock lock4(other.parametersMutex_, std::defer_lock);
   std::lock(lock1, lock2, lock3, lock4);
 
   link_ = other.link_;
@@ -42,55 +38,64 @@ SurfaceHandler &SurfaceHandler::operator=(SurfaceHandler &&other) noexcept {
 
   other.link_ = Link{};
   other.parameters_ = Parameters{};
+  other.parameters_.contextContainer = parameters_.contextContainer;
   return *this;
 }
 
 #pragma mark - Surface Life-Cycle Management
 
+void SurfaceHandler::setContextContainer(
+    ContextContainer::Shared contextContainer) const noexcept {
+  parameters_.contextContainer = std::move(contextContainer);
+}
+
 Status SurfaceHandler::getStatus() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(linkMutex_);
+  std::shared_lock lock(linkMutex_);
   return link_.status;
 }
 
 void SurfaceHandler::start() const noexcept {
+  SystraceSection s("SurfaceHandler::start");
+  std::unique_lock lock(linkMutex_);
+  react_native_assert(
+      link_.status == Status::Registered && "Surface must be registered.");
+  react_native_assert(
+      getLayoutConstraints().layoutDirection != LayoutDirection::Undefined &&
+      "layoutDirection must be set.");
+  react_native_assert(
+      parameters_.contextContainer && "ContextContainer must be set.");
+
+  auto parameters = Parameters{};
   {
-    std::unique_lock<better::shared_mutex> lock(linkMutex_);
-    react_native_assert(
-        link_.status == Status::Registered && "Surface must be registered.");
-    react_native_assert(
-        getLayoutConstraints().layoutDirection != LayoutDirection::Undefined &&
-        "layoutDirection must be set.");
-
-    auto parameters = Parameters{};
-    {
-      std::shared_lock<better::shared_mutex> parametersLock(parametersMutex_);
-      parameters = parameters_;
-    }
-
-    auto shadowTree = std::make_unique<ShadowTree>(
-        parameters.surfaceId,
-        parameters.layoutConstraints,
-        parameters.layoutContext,
-        *link_.uiManager);
-
-    link_.shadowTree = shadowTree.get();
-
-    link_.uiManager->startSurface(
-        std::move(shadowTree),
-        parameters.moduleName,
-        parameters.props,
-        parameters_.displayMode);
-
-    link_.status = Status::Running;
-
-    applyDisplayMode(parameters.displayMode);
+    SystraceSection s2("SurfaceHandler::start::paramsLock");
+    std::shared_lock parametersLock(parametersMutex_);
+    parameters = parameters_;
   }
+
+  auto shadowTree = std::make_unique<ShadowTree>(
+      parameters.surfaceId,
+      parameters.layoutConstraints,
+      parameters.layoutContext,
+      *link_.uiManager,
+      *parameters.contextContainer);
+
+  link_.shadowTree = shadowTree.get();
+
+  link_.uiManager->startSurface(
+      std::move(shadowTree),
+      parameters.moduleName,
+      parameters.props,
+      parameters_.displayMode);
+
+  link_.status = Status::Running;
+
+  applyDisplayMode(parameters.displayMode);
 }
 
 void SurfaceHandler::stop() const noexcept {
   auto shadowTree = ShadowTree::Unique{};
   {
-    std::unique_lock<better::shared_mutex> lock(linkMutex_);
+    std::unique_lock lock(linkMutex_);
     react_native_assert(
         link_.status == Status::Running && "Surface must be running.");
 
@@ -108,7 +113,7 @@ void SurfaceHandler::stop() const noexcept {
 
 void SurfaceHandler::setDisplayMode(DisplayMode displayMode) const noexcept {
   {
-    std::unique_lock<better::shared_mutex> lock(parametersMutex_);
+    std::unique_lock lock(parametersMutex_);
     if (parameters_.displayMode == displayMode) {
       return;
     }
@@ -117,7 +122,7 @@ void SurfaceHandler::setDisplayMode(DisplayMode displayMode) const noexcept {
   }
 
   {
-    std::shared_lock<better::shared_mutex> lock(linkMutex_);
+    std::shared_lock lock(linkMutex_);
 
     if (link_.status != Status::Running) {
       return;
@@ -134,40 +139,41 @@ void SurfaceHandler::setDisplayMode(DisplayMode displayMode) const noexcept {
 }
 
 DisplayMode SurfaceHandler::getDisplayMode() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(parametersMutex_);
+  std::shared_lock lock(parametersMutex_);
   return parameters_.displayMode;
 }
 
 #pragma mark - Accessors
 
 SurfaceId SurfaceHandler::getSurfaceId() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(parametersMutex_);
+  std::shared_lock lock(parametersMutex_);
   return parameters_.surfaceId;
 }
 
 void SurfaceHandler::setSurfaceId(SurfaceId surfaceId) const noexcept {
-  std::unique_lock<better::shared_mutex> lock(parametersMutex_);
+  std::unique_lock lock(parametersMutex_);
   parameters_.surfaceId = surfaceId;
 }
 
 std::string SurfaceHandler::getModuleName() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(parametersMutex_);
+  std::shared_lock lock(parametersMutex_);
   return parameters_.moduleName;
 }
 
 void SurfaceHandler::setProps(folly::dynamic const &props) const noexcept {
-  std::unique_lock<better::shared_mutex> lock(parametersMutex_);
+  SystraceSection s("SurfaceHandler::setProps");
+  std::unique_lock lock(parametersMutex_);
   parameters_.props = props;
 }
 
 folly::dynamic SurfaceHandler::getProps() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(parametersMutex_);
+  std::shared_lock lock(parametersMutex_);
   return parameters_.props;
 }
 
 std::shared_ptr<MountingCoordinator const>
 SurfaceHandler::getMountingCoordinator() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(linkMutex_);
+  std::shared_lock lock(linkMutex_);
   react_native_assert(
       link_.status != Status::Unregistered && "Surface must be registered.");
   react_native_assert(
@@ -180,7 +186,7 @@ SurfaceHandler::getMountingCoordinator() const noexcept {
 Size SurfaceHandler::measure(
     LayoutConstraints const &layoutConstraints,
     LayoutContext const &layoutContext) const noexcept {
-  std::shared_lock<better::shared_mutex> lock(linkMutex_);
+  std::shared_lock lock(linkMutex_);
 
   if (link_.status != Status::Running) {
     return layoutConstraints.clamp({0, 0});
@@ -192,8 +198,11 @@ Size SurfaceHandler::measure(
   auto currentRootShadowNode =
       link_.shadowTree->getCurrentRevision().rootShadowNode;
 
-  auto rootShadowNode =
-      currentRootShadowNode->clone(layoutConstraints, layoutContext);
+  PropsParserContext propsParserContext{
+      parameters_.surfaceId, *parameters_.contextContainer.get()};
+
+  auto rootShadowNode = currentRootShadowNode->clone(
+      propsParserContext, layoutConstraints, layoutContext);
   rootShadowNode->layoutIfNeeded();
   return rootShadowNode->getLayoutMetrics().frame.size;
 }
@@ -201,8 +210,9 @@ Size SurfaceHandler::measure(
 void SurfaceHandler::constraintLayout(
     LayoutConstraints const &layoutConstraints,
     LayoutContext const &layoutContext) const noexcept {
+  SystraceSection s("SurfaceHandler::constraintLayout");
   {
-    std::unique_lock<better::shared_mutex> lock(parametersMutex_);
+    std::unique_lock lock(parametersMutex_);
 
     if (parameters_.layoutConstraints == layoutConstraints &&
         parameters_.layoutContext == layoutContext) {
@@ -214,33 +224,40 @@ void SurfaceHandler::constraintLayout(
   }
 
   {
-    std::shared_lock<better::shared_mutex> lock(linkMutex_);
+    std::shared_lock lock(linkMutex_);
 
     if (link_.status != Status::Running) {
       return;
     }
 
+    PropsParserContext propsParserContext{
+        parameters_.surfaceId, *parameters_.contextContainer.get()};
+
     react_native_assert(
         link_.shadowTree && "`link_.shadowTree` must not be null.");
-    link_.shadowTree->commit([&](RootShadowNode const &oldRootShadowNode) {
-      return oldRootShadowNode.clone(layoutConstraints, layoutContext);
-    });
+    link_.shadowTree->commit(
+        [&](RootShadowNode const &oldRootShadowNode) {
+          return oldRootShadowNode.clone(
+              propsParserContext, layoutConstraints, layoutContext);
+        },
+        {/* default commit options */});
   }
 }
 
 LayoutConstraints SurfaceHandler::getLayoutConstraints() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(parametersMutex_);
+  std::shared_lock lock(parametersMutex_);
   return parameters_.layoutConstraints;
 }
 
 LayoutContext SurfaceHandler::getLayoutContext() const noexcept {
-  std::shared_lock<better::shared_mutex> lock(parametersMutex_);
+  std::shared_lock lock(parametersMutex_);
   return parameters_.layoutContext;
 }
 
 #pragma mark - Private
 
 void SurfaceHandler::applyDisplayMode(DisplayMode displayMode) const noexcept {
+  SystraceSection s("SurfaceHandler::applyDisplayMode");
   react_native_assert(
       link_.status == Status::Running && "Surface must be running.");
   react_native_assert(
@@ -263,16 +280,18 @@ void SurfaceHandler::applyDisplayMode(DisplayMode displayMode) const noexcept {
       link_.shadowTree->setCommitMode(ShadowTree::CommitMode::Suspended);
       // Committing the current revision back. It will be mounted only when
       // `DisplayMode` is changed back to `Normal`.
-      link_.shadowTree->commit([&](RootShadowNode const &oldRootShadowNode) {
-        return std::static_pointer_cast<RootShadowNode>(
-            revision.rootShadowNode->ShadowNode::clone(ShadowNodeFragment{}));
-      });
+      link_.shadowTree->commit(
+          [&](RootShadowNode const & /*oldRootShadowNode*/) {
+            return std::static_pointer_cast<RootShadowNode>(
+                revision.rootShadowNode->ShadowNode::clone({}));
+          },
+          {/* default commit options */});
       break;
   }
 }
 
 void SurfaceHandler::setUIManager(UIManager const *uiManager) const noexcept {
-  std::unique_lock<better::shared_mutex> lock(linkMutex_);
+  std::unique_lock lock(linkMutex_);
 
   react_native_assert(
       link_.status != Status::Running && "Surface must not be running.");
@@ -282,7 +301,8 @@ void SurfaceHandler::setUIManager(UIManager const *uiManager) const noexcept {
   }
 
   link_.uiManager = uiManager;
-  link_.status = uiManager ? Status::Registered : Status::Unregistered;
+  link_.status =
+      uiManager != nullptr ? Status::Registered : Status::Unregistered;
 }
 
 SurfaceHandler::~SurfaceHandler() noexcept {
@@ -293,5 +313,4 @@ SurfaceHandler::~SurfaceHandler() noexcept {
   //      deallocation.");
 }
 
-} // namespace react
-} // namespace facebook
+} // namespace facebook::react

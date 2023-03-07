@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -23,6 +23,7 @@ function toJavaType(
   const importReadableMap = () =>
     addImport('com.facebook.react.bridge.ReadableMap');
   const importArrayList = () => addImport('java.util.ArrayList');
+  const importYogaValue = () => addImport('com.facebook.yoga.YogaValue');
   switch (typeAnnotation.type) {
     /**
      * Primitives
@@ -81,6 +82,12 @@ function toJavaType(
           importReadableMap();
           return '@Nullable ReadableMap';
 
+        // TODO: Make ImageRequestPrimitive type-safe
+        case 'ImageRequestPrimitive':
+          importNullable();
+          importReadableMap();
+          return '@Nullable ReadableMap';
+
         // TODO: Make PointPrimitive type-safe
         case 'PointPrimitive':
           importNullable();
@@ -92,6 +99,12 @@ function toJavaType(
           importNullable();
           importReadableMap();
           return '@Nullable ReadableMap';
+
+        case 'DimensionPrimitive':
+          importNullable();
+          importYogaValue();
+          return '@Nullable YogaValue';
+
         default:
           (typeAnnotation.name: empty);
           throw new Error(
@@ -162,6 +175,11 @@ function toJavaType(
                 importReadableMap();
                 return 'ReadableMap';
 
+              // TODO: Make ImageRequestPrimitive type-safe
+              case 'ImageRequestPrimitive':
+                importReadableMap();
+                return 'ReadableMap';
+
               // TODO: Make PointPrimitive type-safe
               case 'PointPrimitive':
                 importReadableMap();
@@ -171,6 +189,11 @@ function toJavaType(
               case 'EdgeInsetsPrimitive':
                 importReadableMap();
                 return 'ReadableMap';
+
+              case 'DimensionPrimitive':
+                importYogaValue();
+                return 'YogaValue';
+
               default:
                 (elementType.name: empty);
                 throw new Error(
@@ -264,7 +287,7 @@ function serializePojo(pojo: Pojo, basePackageName: string): string {
     .join('\n');
 
   return `/**
-* Copyright (c) Facebook, Inc. and its affiliates.
+* Copyright (c) Meta Platforms, Inc. and affiliates.
 *
 * This source code is licensed under the MIT license found in the
 * LICENSE file in the root directory of this source tree.

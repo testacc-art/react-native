@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include <better/mutex.h>
 #include <memory>
 
 #include <react/renderer/components/root/RootComponentDescriptor.h>
@@ -18,6 +17,7 @@
 #include <react/renderer/mounting/MountingCoordinator.h>
 #include <react/renderer/mounting/ShadowTreeDelegate.h>
 #include <react/renderer/mounting/ShadowTreeRevision.h>
+#include <react/utils/ContextContainer.h>
 #include "MountingOverrideDelegate.h"
 
 namespace facebook {
@@ -58,6 +58,13 @@ class ShadowTree final {
   struct CommitOptions {
     bool enableStateReconciliation{false};
 
+    // Indicates if mounting will be triggered synchronously and React will
+    // not get a chance to interrupt painting.
+    // This should be set to `false` when a commit is comming from React. It
+    // will then let React run layout effects and apply updates before paint.
+    // For all other commits, should be true.
+    bool mountSynchronously{true};
+
     // Called during `tryCommit` phase. Returning true indicates current commit
     // should yield to the next commit.
     std::function<bool()> shouldYield;
@@ -70,7 +77,8 @@ class ShadowTree final {
       SurfaceId surfaceId,
       LayoutConstraints const &layoutConstraints,
       LayoutContext const &layoutContext,
-      ShadowTreeDelegate const &delegate);
+      ShadowTreeDelegate const &delegate,
+      ContextContainer const &contextContainer);
 
   ~ShadowTree();
 
@@ -93,15 +101,15 @@ class ShadowTree final {
    * The `transaction` function can cancel commit returning `nullptr`.
    */
   CommitStatus tryCommit(
-      ShadowTreeCommitTransaction transaction,
-      CommitOptions commitOptions = {false}) const;
+      const ShadowTreeCommitTransaction &transaction,
+      const CommitOptions &commitOptions) const;
 
   /*
    * Calls `tryCommit` in a loop until it finishes successfully.
    */
   CommitStatus commit(
-      ShadowTreeCommitTransaction transaction,
-      CommitOptions commitOptions = {false}) const;
+      const ShadowTreeCommitTransaction &transaction,
+      const CommitOptions &commitOptions) const;
 
   /*
    * Returns a `ShadowTreeRevision` representing the momentary state of
@@ -126,14 +134,14 @@ class ShadowTree final {
  private:
   constexpr static ShadowTreeRevision::Number INITIAL_REVISION{0};
 
-  void mount(ShadowTreeRevision const &revision) const;
+  void mount(ShadowTreeRevision revision, bool mountSynchronously) const;
 
   void emitLayoutEvents(
       std::vector<LayoutableShadowNode const *> &affectedLayoutableNodes) const;
 
   SurfaceId const surfaceId_;
   ShadowTreeDelegate const &delegate_;
-  mutable better::shared_mutex commitMutex_;
+  mutable std::shared_mutex commitMutex_;
   mutable CommitMode commitMode_{
       CommitMode::Normal}; // Protected by `commitMutex_`.
   mutable ShadowTreeRevision currentRevision_; // Protected by `commitMutex_`.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,6 +11,7 @@
 #include <jsi/jsi.h>
 
 #include <ReactCommon/RuntimeExecutor.h>
+#include <shared_mutex>
 
 #include <react/renderer/componentregistry/ComponentDescriptorRegistry.h>
 #include <react/renderer/core/RawValue.h>
@@ -23,6 +24,7 @@
 #include <react/renderer/uimanager/UIManagerAnimationDelegate.h>
 #include <react/renderer/uimanager/UIManagerDelegate.h>
 #include <react/renderer/uimanager/primitives.h>
+#include <react/utils/ContextContainer.h>
 
 namespace facebook::react {
 
@@ -33,7 +35,8 @@ class UIManager final : public ShadowTreeDelegate {
  public:
   UIManager(
       RuntimeExecutor const &runtimeExecutor,
-      BackgroundExecutor const &backgroundExecutor);
+      BackgroundExecutor backgroundExecutor,
+      ContextContainer::Shared contextContainer);
 
   ~UIManager();
 
@@ -60,7 +63,7 @@ class UIManager final : public ShadowTreeDelegate {
    */
   void stopSurfaceForAnimationDelegate(SurfaceId surfaceId) const;
 
-  void animationTick();
+  void animationTick() const;
 
   /*
    * Provides access to a UIManagerBindging.
@@ -69,7 +72,8 @@ class UIManager final : public ShadowTreeDelegate {
    * The callback is called synchronously on the same thread.
    */
   void visitBinding(
-      std::function<void(UIManagerBinding const &uiManagerBinding)> callback,
+      std::function<void(UIManagerBinding const &uiManagerBinding)> const
+          &callback,
       jsi::Runtime &runtime) const;
 
   /*
@@ -100,21 +104,13 @@ class UIManager final : public ShadowTreeDelegate {
 #pragma mark - ShadowTreeDelegate
 
   void shadowTreeDidFinishTransaction(
-      ShadowTree const &shadowTree,
-      MountingCoordinator::Shared const &mountingCoordinator) const override;
+      MountingCoordinator::Shared mountingCoordinator,
+      bool mountSynchronously) const override;
 
   RootShadowNode::Unshared shadowTreeWillCommit(
       ShadowTree const &shadowTree,
       RootShadowNode::Shared const &oldRootShadowNode,
       RootShadowNode::Unshared const &newRootShadowNode) const override;
-
- private:
-  friend class UIManagerBinding;
-  friend class Scheduler;
-  friend class SurfaceHandler;
-
-  // `TimelineController` needs to call private `getShadowTreeRegistry()`.
-  friend class TimelineController;
 
   ShadowNode::Shared createNode(
       Tag tag,
@@ -124,9 +120,9 @@ class UIManager final : public ShadowTreeDelegate {
       SharedEventTarget eventTarget) const;
 
   ShadowNode::Shared cloneNode(
-      const ShadowNode::Shared &shadowNode,
-      const SharedShadowNodeSharedList &children = nullptr,
-      const RawProps *rawProps = nullptr) const;
+      ShadowNode const &shadowNode,
+      ShadowNode::SharedListOfShared const &children = nullptr,
+      RawProps const *rawProps = nullptr) const;
 
   void appendChild(
       const ShadowNode::Shared &parentShadowNode,
@@ -134,7 +130,7 @@ class UIManager final : public ShadowTreeDelegate {
 
   void completeSurface(
       SurfaceId surfaceId,
-      SharedShadowNodeUnsharedList const &rootChildren,
+      ShadowNode::UnsharedListOfShared const &rootChildren,
       ShadowTree::CommitOptions commitOptions) const;
 
   void setIsJSResponder(
@@ -165,11 +161,30 @@ class UIManager final : public ShadowTreeDelegate {
   void dispatchCommand(
       const ShadowNode::Shared &shadowNode,
       std::string const &commandName,
-      folly::dynamic const args) const;
+      folly::dynamic const &args) const;
+
+  void setNativeProps_DEPRECATED(
+      ShadowNode::Shared const &shadowNode,
+      RawProps const &rawProps) const;
 
   void sendAccessibilityEvent(
       const ShadowNode::Shared &shadowNode,
       std::string const &eventType);
+
+  /*
+   * Iterates over all shadow nodes which are parts of all registered surfaces
+   * and find the one that has given `tag`. Returns `nullptr` if the node wasn't
+   * found. This is a temporary workaround that should not be used in any core
+   * functionality.
+   */
+  ShadowNode::Shared findShadowNodeByTag_DEPRECATED(Tag tag) const;
+
+  ShadowTreeRegistry const &getShadowTreeRegistry() const;
+
+ private:
+  friend class UIManagerBinding;
+  friend class Scheduler;
+  friend class SurfaceHandler;
 
   /**
    * Configure a LayoutAnimation to happen on the next commit.
@@ -181,16 +196,15 @@ class UIManager final : public ShadowTreeDelegate {
       jsi::Value const &successCallback,
       jsi::Value const &failureCallback) const;
 
-  ShadowTreeRegistry const &getShadowTreeRegistry() const;
-
   SharedComponentDescriptorRegistry componentDescriptorRegistry_;
-  UIManagerDelegate *delegate_;
+  UIManagerDelegate *delegate_{};
   UIManagerAnimationDelegate *animationDelegate_{nullptr};
   RuntimeExecutor const runtimeExecutor_{};
   ShadowTreeRegistry shadowTreeRegistry_{};
   BackgroundExecutor const backgroundExecutor_{};
+  ContextContainer::Shared contextContainer_;
 
-  mutable better::shared_mutex commitHookMutex_;
+  mutable std::shared_mutex commitHookMutex_;
   mutable std::vector<UIManagerCommitHook const *> commitHooks_;
 
   std::unique_ptr<LeakChecker> leakChecker_;

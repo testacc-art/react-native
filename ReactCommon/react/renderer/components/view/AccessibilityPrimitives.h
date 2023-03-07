@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,9 +7,10 @@
 
 #pragma once
 
-#include <better/optional.h>
 #include <cinttypes>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace facebook {
 namespace react {
@@ -33,6 +34,7 @@ enum class AccessibilityTraits : uint32_t {
   CausesPageTurn = (1 << 14),
   Header = (1 << 15),
   Switch = (1 << 16),
+  TabBar = (1 << 17),
 };
 
 constexpr enum AccessibilityTraits operator|(
@@ -49,15 +51,27 @@ constexpr enum AccessibilityTraits operator&(
 
 struct AccessibilityAction {
   std::string name{""};
-  better::optional<std::string> label{};
+  std::optional<std::string> label{};
 };
+
+inline static bool operator==(
+    AccessibilityAction const &lhs,
+    AccessibilityAction const &rhs) {
+  return lhs.name == rhs.name && lhs.label == rhs.label;
+}
+
+inline static bool operator!=(
+    AccessibilityAction const &lhs,
+    AccessibilityAction const &rhs) {
+  return !(rhs == lhs);
+}
 
 struct AccessibilityState {
   bool disabled{false};
   bool selected{false};
-  enum { Unchecked, Checked, Mixed, None } checked{None};
   bool busy{false};
   bool expanded{false};
+  enum { Unchecked, Checked, Mixed, None } checked{None};
 };
 
 constexpr bool operator==(
@@ -74,11 +88,53 @@ constexpr bool operator!=(
   return !(rhs == lhs);
 }
 
-enum class ImportantForAccessibility {
+struct AccessibilityLabelledBy {
+  std::vector<std::string> value{};
+};
+
+inline static bool operator==(
+    AccessibilityLabelledBy const &lhs,
+    AccessibilityLabelledBy const &rhs) {
+  return lhs.value == rhs.value;
+}
+
+inline static bool operator!=(
+    AccessibilityLabelledBy const &lhs,
+    AccessibilityLabelledBy const &rhs) {
+  return !(lhs == rhs);
+}
+
+struct AccessibilityValue {
+  std::optional<int> min;
+  std::optional<int> max;
+  std::optional<int> now;
+  std::optional<std::string> text{};
+};
+
+constexpr bool operator==(
+    AccessibilityValue const &lhs,
+    AccessibilityValue const &rhs) {
+  return lhs.min == rhs.min && lhs.max == rhs.max && lhs.now == rhs.now &&
+      lhs.text == rhs.text;
+}
+
+constexpr bool operator!=(
+    AccessibilityValue const &lhs,
+    AccessibilityValue const &rhs) {
+  return !(rhs == lhs);
+}
+
+enum class ImportantForAccessibility : uint8_t {
   Auto,
   Yes,
   No,
   NoHideDescendants,
+};
+
+enum class AccessibilityLiveRegion : uint8_t {
+  None,
+  Polite,
+  Assertive,
 };
 
 } // namespace react

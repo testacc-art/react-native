@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -17,10 +17,11 @@ import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.view.Gravity;
 import androidx.annotation.Nullable;
+import com.facebook.common.logging.FLog;
 import com.facebook.infer.annotation.Assertions;
-import com.facebook.react.bridge.JSApplicationIllegalArgumentException;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.common.ReactConstants;
 import com.facebook.react.uimanager.IllegalViewOperationException;
 import com.facebook.react.uimanager.LayoutShadowNode;
 import com.facebook.react.uimanager.NativeViewHierarchyOptimizer;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * {@link ReactShadowNode} abstract class for spannable text nodes.
@@ -178,6 +180,10 @@ public abstract class ReactBaseTextShadowNode extends LayoutShadowNode {
             new SetSpanOperation(
                 start, end, new ReactBackgroundColorSpan(textShadowNode.mBackgroundColor)));
       }
+      if (textShadowNode.mIsAccessibilityLink) {
+        ops.add(
+            new SetSpanOperation(start, end, new ReactClickableSpan(textShadowNode.getReactTag())));
+      }
       float effectiveLetterSpacing = textAttributes.getEffectiveLetterSpacing();
       if (!Float.isNaN(effectiveLetterSpacing)
           && (parentTextAttributes == null
@@ -319,6 +325,7 @@ public abstract class ReactBaseTextShadowNode extends LayoutShadowNode {
   protected int mColor;
   protected boolean mIsBackgroundColorSet = false;
   protected int mBackgroundColor;
+  protected boolean mIsAccessibilityLink = false;
 
   protected int mNumberOfLines = UNSET;
   protected int mTextAlign = Gravity.NO_GRAVITY;
@@ -454,7 +461,8 @@ public abstract class ReactBaseTextShadowNode extends LayoutShadowNode {
       } else if ("center".equals(textAlign)) {
         mTextAlign = Gravity.CENTER_HORIZONTAL;
       } else {
-        throw new JSApplicationIllegalArgumentException("Invalid textAlign: " + textAlign);
+        FLog.w(ReactConstants.TAG, "Invalid textAlign: " + textAlign);
+        mTextAlign = Gravity.NO_GRAVITY;
       }
     }
     markUpdated();
@@ -486,6 +494,14 @@ public abstract class ReactBaseTextShadowNode extends LayoutShadowNode {
       if (mIsBackgroundColorSet) {
         mBackgroundColor = color;
       }
+      markUpdated();
+    }
+  }
+
+  @ReactProp(name = ViewProps.ACCESSIBILITY_ROLE)
+  public void setIsAccessibilityLink(@Nullable String accessibilityRole) {
+    if (isVirtual()) {
+      mIsAccessibilityLink = Objects.equals(accessibilityRole, "link");
       markUpdated();
     }
   }
@@ -558,8 +574,8 @@ public abstract class ReactBaseTextShadowNode extends LayoutShadowNode {
     } else if ("balanced".equals(textBreakStrategy)) {
       mTextBreakStrategy = Layout.BREAK_STRATEGY_BALANCED;
     } else {
-      throw new JSApplicationIllegalArgumentException(
-          "Invalid textBreakStrategy: " + textBreakStrategy);
+      FLog.w(ReactConstants.TAG, "Invalid textBreakStrategy: " + textBreakStrategy);
+      mTextBreakStrategy = Layout.BREAK_STRATEGY_HIGH_QUALITY;
     }
 
     markUpdated();
@@ -615,7 +631,8 @@ public abstract class ReactBaseTextShadowNode extends LayoutShadowNode {
     } else if ("capitalize".equals(textTransform)) {
       mTextAttributes.setTextTransform(TextTransform.CAPITALIZE);
     } else {
-      throw new JSApplicationIllegalArgumentException("Invalid textTransform: " + textTransform);
+      FLog.w(ReactConstants.TAG, "Invalid textTransform: " + textTransform);
+      mTextAttributes.setTextTransform(TextTransform.UNSET);
     }
     markUpdated();
   }

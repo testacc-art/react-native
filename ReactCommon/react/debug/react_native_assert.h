@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -11,6 +11,12 @@
 // react_native_assert allows us to opt-in to specific asserts on Android and
 // test before moving on. When all issues have been found, maybe we can use
 // `UNDEBUG` flag to disable NDEBUG in debug builds on Android.
+
+// Asserting is appropriate for conditions that:
+//   1. May or may not be recoverable, and
+//   2. imply there is a bug in React Native when violated.
+// For recoverable conditions that can be violated by user mistake (e.g. JS
+// code passes an unexpected prop value), consider react_native_expect instead.
 
 #include "flags.h"
 
@@ -55,7 +61,7 @@ void react_native_assert_fail(
 #define react_native_assert(cond)                           \
   if (!(cond)) {                                            \
     LOG(ERROR) << "react_native_assert failure: " << #cond; \
-    google::FlushLogFiles(google::INFO);                    \
+    google::FlushLogFiles(google::GLOG_INFO);               \
     assert(cond);                                           \
   }
 

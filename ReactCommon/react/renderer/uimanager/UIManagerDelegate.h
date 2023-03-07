@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -23,7 +23,8 @@ class UIManagerDelegate {
    * For this moment the tree is already laid out and sealed.
    */
   virtual void uiManagerDidFinishTransaction(
-      MountingCoordinator::Shared const &mountingCoordinator) = 0;
+      MountingCoordinator::Shared mountingCoordinator,
+      bool mountSynchronously) = 0;
 
   /*
    * Called each time when UIManager constructs a new Shadow Node. Receiver
@@ -33,21 +34,12 @@ class UIManagerDelegate {
   virtual void uiManagerDidCreateShadowNode(const ShadowNode &shadowNode) = 0;
 
   /*
-   * Called each time when UIManager clones a Shadow Node. Receiver
-   * might use this to optimistically allocate a new native view
-   * instances.
-   */
-  virtual void uiManagerDidCloneShadowNode(
-      const ShadowNode &oldShadowNode,
-      const ShadowNode &newShadowNode) = 0;
-
-  /*
    * Called when UIManager wants to dispatch a command to the mounting layer.
    */
   virtual void uiManagerDidDispatchCommand(
       const ShadowNode::Shared &shadowNode,
       std::string const &commandName,
-      folly::dynamic const args) = 0;
+      folly::dynamic const &args) = 0;
 
   /*
    * Called when UIManager wants to dispatch some accessibility event

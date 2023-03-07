@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Facebook, Inc. and its affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,6 +12,7 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.os.Build;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -34,10 +35,13 @@ import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.common.annotations.VisibleForTesting;
+import com.facebook.react.config.ReactFeatureFlags;
 import com.facebook.react.uimanager.FabricViewStateManager;
+import com.facebook.react.uimanager.JSPointerDispatcher;
 import com.facebook.react.uimanager.JSTouchDispatcher;
 import com.facebook.react.uimanager.PixelUtil;
 import com.facebook.react.uimanager.RootView;
+import com.facebook.react.uimanager.ThemedReactContext;
 import com.facebook.react.uimanager.UIManagerModule;
 import com.facebook.react.uimanager.events.EventDispatcher;
 import com.facebook.react.views.common.ContextUtils;
@@ -84,9 +88,9 @@ public class ReactModalHostView extends ViewGroup
   private @Nullable DialogInterface.OnShowListener mOnShowListener;
   private @Nullable OnRequestCloseListener mOnRequestCloseListener;
 
-  public ReactModalHostView(Context context) {
+  public ReactModalHostView(ThemedReactContext context) {
     super(context);
-    ((ReactContext) context).addLifecycleEventListener(this);
+    context.addLifecycleEventListener(this);
 
     mHostView = new DialogRootViewGroup(context);
   }
@@ -117,7 +121,9 @@ public class ReactModalHostView extends ViewGroup
 
   @Override
   public int getChildCount() {
-    return mHostView.getChildCount();
+    // This method may be called by the parent constructor
+    // before mHostView is initialized.
+    return mHostView == null ? 0 : mHostView.getChildCount();
   }
 
   @Override
@@ -154,7 +160,7 @@ public class ReactModalHostView extends ViewGroup
   }
 
   public void onDropInstance() {
-    ((ReactContext) getContext()).removeLifecycleEventListener(this);
+    ((ThemedReactContext) getContext()).removeLifecycleEventListener(this);
     dismiss();
   }
 
@@ -232,7 +238,7 @@ public class ReactModalHostView extends ViewGroup
   }
 
   private @Nullable Activity getCurrentActivity() {
-    return ((ReactContext) getContext()).getCurrentActivity();
+    return ((ThemedReactContext) getContext()).getCurrentActivity();
   }
 
   /**
@@ -293,14 +299,11 @@ public class ReactModalHostView extends ViewGroup
           @Override
           public boolean onKey(DialogInterface dialog, int keyCode, KeyEvent event) {
             if (event.getAction() == KeyEvent.ACTION_UP) {
-              // We need to stop the BACK button from closing the dialog by default so we capture
-              // that
-              // event and instead inform JS so that it can make the decision as to whether or not
-              // to
-              // allow the back button to close the dialog.  If it chooses to, it can just set
-              // visible
-              // to false on the Modal and the Modal will go away
-              if (keyCode == KeyEvent.KEYCODE_BACK) {
+              // We need to stop the BACK button and ESCAPE key from closing the dialog by default
+              // so we capture that event and instead inform JS so that it can make the decision as
+              // to whether or not to allow the back/escape key to close the dialog. If it chooses
+              // to, it can just set visible to false on the Modal and the Modal will go away
+              if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE) {
                 Assertions.assertNotNull(
                     mOnRequestCloseListener,
                     "setOnRequestCloseListener must be called by the manager");
@@ -308,9 +311,8 @@ public class ReactModalHostView extends ViewGroup
                 return true;
               } else {
                 // We redirect the rest of the key events to the current activity, since the
-                // activity
-                // expects to receive those events and react to them, ie. in the case of the dev
-                // menu
+                // activity expects to receive those events and react to them, ie. in the case of
+                // the dev menu
                 Activity currentActivity = ((ReactContext) getContext()).getCurrentActivity();
                 if (currentActivity != null) {
                   return currentActivity.onKeyUp(keyCode, event);
@@ -328,11 +330,17 @@ public class ReactModalHostView extends ViewGroup
     if (currentActivity != null && !currentActivity.isFinishing()) {
       mDialog.show();
       if (context instanceof Activity) {
-        mDialog
-            .getWindow()
-            .getDecorView()
-            .setSystemUiVisibility(
-                ((Activity) context).getWindow().getDecorView().getSystemUiVisibility());
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.R) {
+          int appearance =
+              ((Activity) context).getWindow().getInsetsController().getSystemBarsAppearance();
+          mDialog.getWindow().getInsetsController().setSystemBarsAppearance(appearance, appearance);
+        } else {
+          mDialog
+              .getWindow()
+              .getDecorView()
+              .setSystemUiVisibility(
+                  ((Activity) context).getWindow().getDecorView().getSystemUiVisibility());
+        }
       }
       mDialog.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
     }
@@ -417,9 +425,13 @@ public class ReactModalHostView extends ViewGroup
     private final FabricViewStateManager mFabricViewStateManager = new FabricViewStateManager();
 
     private final JSTouchDispatcher mJSTouchDispatcher = new JSTouchDispatcher(this);
+    @Nullable private JSPointerDispatcher mJSPointerDispatcher;
 
     public DialogRootViewGroup(Context context) {
       super(context);
+      if (ReactFeatureFlags.dispatchPointerEvents) {
+        mJSPointerDispatcher = new JSPointerDispatcher(this);
+      }
     }
 
     private void setEventDispatcher(EventDispatcher eventDispatcher) {
@@ -449,7 +461,9 @@ public class ReactModalHostView extends ViewGroup
                 @Override
                 public void runGuarded() {
                   UIManagerModule uiManager =
-                      (getReactContext()).getNativeModule(UIManagerModule.class);
+                      getReactContext()
+                          .getReactApplicationContext()
+                          .getNativeModule(UIManagerModule.class);
 
                   if (uiManager == null) {
                     return;
@@ -509,22 +523,28 @@ public class ReactModalHostView extends ViewGroup
 
     @Override
     public void handleException(Throwable t) {
-      getReactContext().handleException(new RuntimeException(t));
+      getReactContext().getReactApplicationContext().handleException(new RuntimeException(t));
     }
 
-    private ReactContext getReactContext() {
-      return (ReactContext) getContext();
+    private ThemedReactContext getReactContext() {
+      return (ThemedReactContext) getContext();
     }
 
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
       mJSTouchDispatcher.handleTouchEvent(event, mEventDispatcher);
+      if (mJSPointerDispatcher != null) {
+        mJSPointerDispatcher.handleMotionEvent(event, mEventDispatcher, true);
+      }
       return super.onInterceptTouchEvent(event);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
       mJSTouchDispatcher.handleTouchEvent(event, mEventDispatcher);
+      if (mJSPointerDispatcher != null) {
+        mJSPointerDispatcher.handleMotionEvent(event, mEventDispatcher, false);
+      }
       super.onTouchEvent(event);
       // In case when there is no children interested in handling touch event, we return true from
       // the root view in order to receive subsequent events related to that gesture
@@ -532,8 +552,40 @@ public class ReactModalHostView extends ViewGroup
     }
 
     @Override
-    public void onChildStartedNativeGesture(MotionEvent androidEvent) {
-      mJSTouchDispatcher.onChildStartedNativeGesture(androidEvent, mEventDispatcher);
+    public boolean onInterceptHoverEvent(MotionEvent event) {
+      if (mJSPointerDispatcher != null) {
+        mJSPointerDispatcher.handleMotionEvent(event, mEventDispatcher, true);
+      }
+      return super.onHoverEvent(event);
+    }
+
+    @Override
+    public boolean onHoverEvent(MotionEvent event) {
+      if (mJSPointerDispatcher != null) {
+        mJSPointerDispatcher.handleMotionEvent(event, mEventDispatcher, false);
+      }
+      return super.onHoverEvent(event);
+    }
+
+    @Override
+    public void onChildStartedNativeGesture(MotionEvent ev) {
+      this.onChildStartedNativeGesture(null, ev);
+    }
+
+    @Override
+    public void onChildStartedNativeGesture(View childView, MotionEvent ev) {
+      mJSTouchDispatcher.onChildStartedNativeGesture(ev, mEventDispatcher);
+      if (mJSPointerDispatcher != null) {
+        mJSPointerDispatcher.onChildStartedNativeGesture(childView, ev, mEventDispatcher);
+      }
+    }
+
+    @Override
+    public void onChildEndedNativeGesture(View childView, MotionEvent ev) {
+      mJSTouchDispatcher.onChildEndedNativeGesture(ev, mEventDispatcher);
+      if (mJSPointerDispatcher != null) {
+        mJSPointerDispatcher.onChildEndedNativeGesture();
+      }
     }
 
     @Override
