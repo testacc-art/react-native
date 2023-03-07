@@ -12,7 +12,13 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v2
-
+    - name: Update yarn
+      run: yarn set version berry
+    - name: Yarn version
+      run: yarn --version
+    - name: Generate simple .yarnrc.yml
+      run: |
+        echo "nodeLinker: node-modules" >> .yarnrc.yml
     - uses: actions/setup-node@v3
       with:
         node-version: '14'
